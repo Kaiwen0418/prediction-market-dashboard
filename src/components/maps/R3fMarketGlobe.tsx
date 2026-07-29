@@ -20,6 +20,7 @@ import ukRegions from "@/components/maps/data/uk-regions.json";
 import ukraineOblasts from "@/components/maps/data/ukraine-oblasts.json";
 import worldCountries from "@/components/maps/data/world-countries-110m.json";
 import { normalizeD3PolygonWinding } from "@/components/maps/geoJson";
+import { subdivideGlobeBoundaryEdge } from "@/components/maps/globeBoundaryGeometry";
 import {
   appendTradePopupQueue,
   type ExpiringTradePopup
@@ -724,11 +725,13 @@ function createBoundaryWallGeometry(
   {
     edgesByPolygon,
     preciseCountryCode,
-    preciseCountryPerimeter
+    preciseCountryPerimeter,
+    topOnly = false
   }: {
     edgesByPolygon?: Map<GlobePolygon, BoundaryEdge[]>;
     preciseCountryCode?: string;
     preciseCountryPerimeter?: BoundaryEdge[];
+    topOnly?: boolean;
   } = {}
 ) {
   const segments = new Map<string, BoundaryWallSegment>();
@@ -800,24 +803,28 @@ function createBoundaryWallGeometry(
       });
 
     polygonEdges.forEach(({ start, end }) => {
-      if (
-        Math.abs(start[0] - end[0]) < 1e-7 &&
-        Math.abs(start[1] - end[1]) < 1e-7
-      ) {
-        return;
-      }
-      const key = boundarySegmentKey(start, end);
-      if ((segments.get(key)?.priority ?? 0) > priority) return;
-      segments.set(key, {
-        start,
-        end,
-        bottomAltitude: capAltitude + 0.0001,
-        topAltitude: capAltitude + wallHeight,
-        halfWidth,
-        color,
-        sideColor,
-        priority
-      });
+      subdivideGlobeBoundaryEdge(start, end).forEach(
+        ({ start: segmentStart, end: segmentEnd }) => {
+          if (
+            Math.abs(segmentStart[0] - segmentEnd[0]) < 1e-7 &&
+            Math.abs(segmentStart[1] - segmentEnd[1]) < 1e-7
+          ) {
+            return;
+          }
+          const key = boundarySegmentKey(segmentStart, segmentEnd);
+          if ((segments.get(key)?.priority ?? 0) > priority) return;
+          segments.set(key, {
+            start: segmentStart,
+            end: segmentEnd,
+            bottomAltitude: capAltitude + 0.0001,
+            topAltitude: capAltitude + wallHeight,
+            halfWidth,
+            color,
+            sideColor,
+            priority
+          });
+        }
+      );
     });
   });
 
@@ -840,8 +847,14 @@ function createBoundaryWallGeometry(
   const topStartRight = new THREE.Vector3();
   const topEndLeft = new THREE.Vector3();
   const topEndRight = new THREE.Vector3();
-  const pushFace = (points: THREE.Vector3[], color: THREE.Color) => {
-    points.forEach((point) => {
+  const pushFace = (
+    points: THREE.Vector3[],
+    faceColors: THREE.Color | THREE.Color[]
+  ) => {
+    points.forEach((point, index) => {
+      const color = Array.isArray(faceColors)
+        ? faceColors[index]
+        : faceColors;
       positions.push(point.x, point.y, point.z);
       colors.push(color.r, color.g, color.b);
     });
@@ -884,28 +897,44 @@ function createBoundaryWallGeometry(
       ],
       topColor
     );
-    pushFace(
-      [
-        bottomStartLeft,
-        bottomEndLeft,
-        topEndLeft,
-        bottomStartLeft,
-        topEndLeft,
-        topStartLeft
-      ],
-      segment.sideColor
-    );
-    pushFace(
-      [
-        bottomEndRight,
-        bottomStartRight,
-        topStartRight,
-        bottomEndRight,
-        topStartRight,
-        topEndRight
-      ],
-      segment.sideColor
-    );
+    if (!topOnly) {
+      pushFace(
+        [
+          bottomStartLeft,
+          bottomEndLeft,
+          topEndLeft,
+          bottomStartLeft,
+          topEndLeft,
+          topStartLeft
+        ],
+        [
+          segment.sideColor,
+          segment.sideColor,
+          topColor,
+          segment.sideColor,
+          topColor,
+          topColor
+        ]
+      );
+      pushFace(
+        [
+          bottomEndRight,
+          bottomStartRight,
+          topStartRight,
+          bottomEndRight,
+          topStartRight,
+          topEndRight
+        ],
+        [
+          segment.sideColor,
+          segment.sideColor,
+          topColor,
+          segment.sideColor,
+          topColor,
+          topColor
+        ]
+      );
+    }
   });
 
   const geometry = new THREE.BufferGeometry();
@@ -1762,6 +1791,55 @@ function BoundaryWalls({
   );
 }
 
+function SelectedBoundaryCrown({
+  polygons,
+  edgesByPolygon
+}: {
+  polygons: GlobePolygon[];
+  edgesByPolygon: Map<GlobePolygon, BoundaryEdge[]>;
+}) {
+  const geometry = useMemo(
+    () =>
+      createBoundaryWallGeometry(polygons, {
+        edgesByPolygon,
+        topOnly: true
+      }),
+    [edgesByPolygon, polygons]
+  );
+  const material = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.7,
+        metalness: 0,
+        envMapIntensity: 0.1,
+        side: THREE.FrontSide,
+        depthTest: false,
+        depthWrite: false
+      }),
+    []
+  );
+
+  useEffect(
+    () => () => {
+      geometry.dispose();
+      material.dispose();
+    },
+    [geometry, material]
+  );
+
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      castShadow={false}
+      receiveShadow={false}
+      userData={{ skipShadowRegistration: true }}
+      renderOrder={7}
+    />
+  );
+}
+
 function OceanReflectionEnvironment() {
   const { gl, scene } = useThree();
 
@@ -1878,6 +1956,10 @@ export function R3fMarketGlobe({
   );
   const regionalBoundaryPrecision = useMemo(
     () => buildRegionalBoundaryPrecision(regionalPolygons),
+    [regionalPolygons]
+  );
+  const selectedRegionalPolygons = useMemo(
+    () => regionalPolygons.filter((polygon) => polygon.selected),
     [regionalPolygons]
   );
   const worldPolygons = useMemo<GlobePolygon[]>(
@@ -2420,6 +2502,12 @@ export function R3fMarketGlobe({
               polygons={regionalPolygons}
               edgesByPolygon={regionalBoundaryPrecision.edgesByPolygon}
             />
+            {selectedRegionalPolygons.length ? (
+              <SelectedBoundaryCrown
+                polygons={selectedRegionalPolygons}
+                edgesByPolygon={regionalBoundaryPrecision.edgesByPolygon}
+              />
+            ) : null}
             {PROJECTED_PILLAR_CONTACT_SHADOWS_ENABLED ? (
               <ProjectedPillarContactShadows pillars={pillars} />
             ) : null}

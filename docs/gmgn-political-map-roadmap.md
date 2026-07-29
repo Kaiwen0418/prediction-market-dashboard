@@ -883,6 +883,18 @@ Status: complete
 - [x] Verify the corrected geometry at desktop and mobile viewports.
 - [x] Save screenshots under `tmp/frontend-ukraine-r3f-winding/`.
 
+### Phase 70: Selected Border Closure on the Globe
+
+Status: complete
+
+- [x] Identify adjacent cap depth occlusion as the cause of Bulgaria's missing far-side border.
+- [x] Subdivide long simplified boundary edges so wall geometry follows the globe curvature.
+- [x] Preserve the shaded solid wall while adding a selected-region top-only border crown.
+- [x] Keep the crown front-facing so it cannot show through the back of the globe.
+- [x] Add regression coverage for long boundary spans and antimeridian subdivision.
+- [x] Verify Bulgaria border closure at desktop, rotated, and mobile viewports.
+- [x] Save screenshots under `tmp/frontend-bulgaria-border-closure/`.
+
 ## Deployment and Operations
 
 - Frontend: Vercel preview and production deployments.
