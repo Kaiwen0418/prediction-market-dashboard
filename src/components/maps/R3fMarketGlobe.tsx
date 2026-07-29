@@ -1784,7 +1784,7 @@ function BoundaryWalls({
       geometry={geometry}
       material={material}
       castShadow
-      receiveShadow={false}
+      receiveShadow
       userData={{ skipShadowRegistration: true }}
       renderOrder={6}
     />
@@ -1833,7 +1833,7 @@ function SelectedBoundaryCrown({
       geometry={geometry}
       material={material}
       castShadow={false}
-      receiveShadow={false}
+      receiveShadow
       userData={{ skipShadowRegistration: true }}
       renderOrder={7}
     />

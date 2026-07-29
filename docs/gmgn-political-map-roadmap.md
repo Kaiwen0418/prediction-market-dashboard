@@ -895,6 +895,16 @@ Status: complete
 - [x] Verify Bulgaria border closure at desktop, rotated, and mobile viewports.
 - [x] Save screenshots under `tmp/frontend-bulgaria-border-closure/`.
 
+### Phase 71: Pillar Shadows on Border Walls
+
+Status: complete
+
+- [x] Identify disabled shadow reception on both solid border walls and the selected border crown.
+- [x] Enable real shadow-map reception on both border surfaces.
+- [x] Verify pillar shadows visibly darken border tops without destabilizing wall shading.
+- [x] Verify the result at desktop and mobile viewports.
+- [x] Save screenshots under `tmp/frontend-border-shadow-reception/`.
+
 ## Deployment and Operations
 
 - Frontend: Vercel preview and production deployments.
