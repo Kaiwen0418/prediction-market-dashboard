@@ -873,6 +873,16 @@ Status: complete
 - [x] Add regression coverage for venue matching, FIFO capacity, and expiry.
 - [x] Save screenshots under `tmp/frontend-persistent-context-live-trade-fifo/`.
 
+### Phase 69: Ukraine R3F Polygon Winding
+
+Status: complete
+
+- [x] Identify mixed outer-ring winding in the Ukraine oblast source.
+- [x] Reuse the existing D3-compatible winding normalization in the R3F boundary path.
+- [x] Verify Ukraine country focus and oblast selection without globe-complement caps.
+- [x] Verify the corrected geometry at desktop and mobile viewports.
+- [x] Save screenshots under `tmp/frontend-ukraine-r3f-winding/`.
+
 ## Deployment and Operations
 
 - Frontend: Vercel preview and production deployments.

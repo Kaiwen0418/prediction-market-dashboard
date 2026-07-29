@@ -19,6 +19,7 @@ import germanyStates from "@/components/maps/data/germany-states.json";
 import ukRegions from "@/components/maps/data/uk-regions.json";
 import ukraineOblasts from "@/components/maps/data/ukraine-oblasts.json";
 import worldCountries from "@/components/maps/data/world-countries-110m.json";
+import { normalizeD3PolygonWinding } from "@/components/maps/geoJson";
 import {
   appendTradePopupQueue,
   type ExpiringTradePopup
@@ -104,6 +105,8 @@ const worldFeatureCollection = feature(
 ) as unknown as FeatureCollection;
 
 const WORLD_FEATURES = worldFeatureCollection.features;
+const NORMALIZED_UKRAINE_OBLASTS =
+  normalizeD3PolygonWinding(ukraineOblasts);
 const GLOBE_RADIUS = 100;
 const GLOBE_SCALE = 1.48;
 const GLOBE_INTRO_ROTATION_DURATION_MS = 1200;
@@ -258,7 +261,9 @@ function getCountryBoundaryFeatures(country: CountryMarketMap) {
   } else if (country.code === "DE") {
     boundaryFeatures = toFeatureCollection(germanyStates).features;
   } else if (country.code === "UA") {
-    boundaryFeatures = toFeatureCollection(ukraineOblasts).features;
+    boundaryFeatures = toFeatureCollection(
+      NORMALIZED_UKRAINE_OBLASTS
+    ).features;
   } else {
     boundaryFeatures = WORLD_FEATURES.filter((countryFeature) =>
       country.worldFeatureIds.includes(String(countryFeature.id))
