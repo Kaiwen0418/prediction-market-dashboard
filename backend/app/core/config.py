@@ -26,6 +26,9 @@ class Settings(BaseSettings):
         ]
     )
     request_timeout_seconds: float = 8.0
+    upstream_response_cache_max_entries: int = 512
+    upstream_response_cache_max_bytes: int = 128 * 1024 * 1024
+    upstream_response_cache_payload_multiplier: float = 3.0
     polymarket_market_cache_ttl_seconds: int = 300
     polymarket_market_stale_if_error_seconds: int = 3600
     polymarket_orderbook_cache_ttl_seconds: int = 2

@@ -43,11 +43,19 @@ WALLET_ADDRESS_PATTERN = re.compile(r"^0x[a-fA-F0-9]{40}$")
 class CachedJsonResponse:
     payload: Any
     stored_at: float
+    estimated_size_bytes: int
 
 
 class JsonResponseCache:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        max_entries: int = 512,
+        max_bytes: int = 128 * 1024 * 1024,
+    ) -> None:
         self._entries: dict[str, CachedJsonResponse] = {}
+        self._max_entries = max(max_entries, 1)
+        self._max_bytes = max(max_bytes, 1)
+        self._size_bytes = 0
         self._locks: WeakValueDictionary[str, asyncio.Lock] = (
             WeakValueDictionary()
         )
@@ -61,21 +69,48 @@ class JsonResponseCache:
             return None
         return entry.payload
 
-    def put(self, url: str, payload: Any, now: float | None = None) -> None:
-        if len(self._entries) >= 2_048 and url not in self._entries:
-            oldest_url = min(
-                self._entries,
-                key=lambda key: self._entries[key].stored_at,
-            )
-            self._entries.pop(oldest_url, None)
+    def put(
+        self,
+        url: str,
+        payload: Any,
+        estimated_size_bytes: int = 1_024,
+        now: float | None = None,
+    ) -> None:
+        size = max(estimated_size_bytes, 1)
+        if size > self._max_bytes:
+            return
+
+        previous = self._entries.pop(url, None)
+        if previous is not None:
+            self._size_bytes -= previous.estimated_size_bytes
+
+        while self._entries and (
+            len(self._entries) >= self._max_entries
+            or self._size_bytes + size > self._max_bytes
+        ):
+            oldest_url = min(self._entries, key=lambda key: self._entries[key].stored_at)
+            oldest = self._entries.pop(oldest_url)
+            self._size_bytes -= oldest.estimated_size_bytes
+
         self._entries[url] = CachedJsonResponse(
             payload=payload,
             stored_at=time.monotonic() if now is None else now,
+            estimated_size_bytes=size,
         )
+        self._size_bytes += size
 
     def clear(self) -> None:
         self._entries.clear()
         self._locks.clear()
+        self._size_bytes = 0
+
+    def stats(self) -> dict[str, int]:
+        return {
+            "entries": len(self._entries),
+            "estimatedSizeBytes": self._size_bytes,
+            "maxEntries": self._max_entries,
+            "maxSizeBytes": self._max_bytes,
+        }
 
     def lock_for(self, url: str) -> asyncio.Lock:
         lock = self._locks.get(url)
@@ -85,7 +120,11 @@ class JsonResponseCache:
         return lock
 
 
-json_response_cache = JsonResponseCache()
+settings = get_settings()
+json_response_cache = JsonResponseCache(
+    max_entries=settings.upstream_response_cache_max_entries,
+    max_bytes=settings.upstream_response_cache_max_bytes,
+)
 
 
 async def fetch_json(
@@ -139,7 +178,16 @@ async def _fetch_json_upstream(
 
         payload = response.json()
         if cache_ttl_seconds > 0:
-            json_response_cache.put(url, payload)
+            # A decoded Python JSON tree occupies materially more resident memory
+            # than its wire representation. Bound the cache using a conservative
+            # multiplier so large history/candle responses cannot exhaust a worker.
+            content = getattr(response, "content", b"")
+            wire_size = len(content) if isinstance(content, bytes) else 0
+            estimated_size = max(
+                int(wire_size * settings.upstream_response_cache_payload_multiplier),
+                1_024,
+            )
+            json_response_cache.put(url, payload, estimated_size_bytes=estimated_size)
         return payload
     except HTTPException as error:
         can_use_stale = error.status_code == 429 or error.status_code >= 500

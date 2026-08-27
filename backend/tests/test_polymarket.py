@@ -17,6 +17,21 @@ class PolymarketSummaryTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cache.get("market", 3900, now=4000.0), {"price": 0.62})
         self.assertIsNone(cache.get("market", 3900, now=4001.0))
 
+    def test_json_cache_evicts_old_entries_to_honor_memory_budget(self) -> None:
+        cache = polymarket_service.JsonResponseCache(max_entries=10, max_bytes=100)
+        cache.put("first", {"value": 1}, estimated_size_bytes=60, now=1.0)
+        cache.put("second", {"value": 2}, estimated_size_bytes=60, now=2.0)
+
+        self.assertIsNone(cache.get("first", 100, now=2.0))
+        self.assertEqual(cache.get("second", 100, now=2.0), {"value": 2})
+        self.assertEqual(cache.stats()["estimatedSizeBytes"], 60)
+
+    def test_json_cache_skips_payload_larger_than_memory_budget(self) -> None:
+        cache = polymarket_service.JsonResponseCache(max_entries=10, max_bytes=100)
+        cache.put("oversized", {"large": True}, estimated_size_bytes=101, now=1.0)
+
+        self.assertIsNone(cache.get("oversized", 100, now=1.0))
+
     async def test_fetch_json_serves_stale_market_during_upstream_failure(self) -> None:
         url = "https://gamma.example/events/slug/test-market"
         cached_payload = {"slug": "test-market", "price": 0.62}
