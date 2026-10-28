@@ -39,7 +39,7 @@ recovers after the five-minute database lease expires.
 
 - Independent unfiltered contract catalog: Polymarket keyset walks for **both open
   and closed** markets; Kalshi market pagination. Preserve every returned contract,
-  every outcome/token and each observed rule snapshot, including reverted rules.
+  every outcome/token and each changed rule snapshot, including reverted rules.
 - Read-only Polymarket **`/v2/trades`** and Kalshi REST collection. Fixed filters on
   every cursor page. Empty v2 pages with a next cursor continue; malformed envelopes,
   repeated cursors, detected cursor cycles and ordering violations are explicit errors.
@@ -48,7 +48,7 @@ recovers after the five-minute database lease expires.
   advance the cursor. Valid HTTP error responses are archived before raising errors.
 - Exact response bytes in immutable, atomic Parquet files with SHA-256, source,
   query, status and receipt timestamp. `verify` reopens files and checks hashes.
-  Files and the database require coordinated backup. Crash-orphaned Parquet files
+  Identical response bytes share a content-addressed blob; each HTTP receipt retains its own database provenance. Crash-orphaned Parquet files
   may remain if the database index commit failed; they are not silently deleted.
 - Default budget: 100 selected contracts per venue, with 20% hourly rotating
   exploration. Rules/category keywords and proximity provide an initial ranking;
@@ -95,7 +95,7 @@ profile can be constructed from the public tape. Polymarket signals are grouped 
 outcome token; buying NO is not pooled with buying YES.
 
 All detector inputs satisfy both `event_time <= as_of` and `received_at <= as_of`.
-Rule snapshots must have been observed by `as_of`. Later intake can carry an older
+Rule snapshots must have been observed by `as_of`. Unchanged rules reuse the existing version. Later intake can carry an older
 `published_at`, but cannot enter the detection-time timeline retroactively.
 `first_seen_at` is our first receipt, not first public availability. Publication
 verification is a reviewer assertion with a required note, not automated fact checking.
@@ -151,8 +151,20 @@ Reports expose REST sampling and unavailable order-book coverage explicitly.
 
 Schema initialization is idempotent for version 1; future incompatible changes need
 an explicit versioned migration. Use a dedicated database, not the dashboard database.
-Disk retention/compaction, queue archival and large-history replay optimization are
-operational follow-up work. Back up raw files before pruning any database references.
+The single worker performs bounded hourly retention: cases/coverage/paused jobs expire
+at 7 days, trades/unreferenced raw at 8 days, with retained-case inputs and current
+catalog/rules pinned. Manual information remains retained. Deleted database pages
+are reused rather than immediately shrinking files. Cleanup batch limits and pinned
+references can extend retention. Do not run multiple archive writers during cleanup.
+
+Automatic candidates coalesce for one hour per contract/outcome/window, unless the
+anomaly score rises by 20 points. Explicit replay is not coalesced. Replay is capped
+at 50,000 observed trades: excess produces an explicit capacity error (HTTP 413)
+without a partial score. Configure `SURVEILLANCE_REPLAY_MAX_TRADES` only after measuring
+memory. `SURVEILLANCE_RETENTION_DAYS` controls test-data retention (default 7).
+
+See `deploy/README.md` and `docs/surveillance-capacity-2026-10-28.md` for the local
+machine deployment and measured costs. The deployment uses 20 contracts per venue.
 
 ## Validation
 

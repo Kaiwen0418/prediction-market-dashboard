@@ -9,21 +9,26 @@ BASELINE_WINDOWS = 12
 
 def evaluate(trades, as_of):
     cutoff = datetime.fromisoformat(as_of)
-    eligible = sorted((t for t in trades if datetime.fromisoformat(t["event_time"]) <= cutoff
-                       and datetime.fromisoformat(t["received_at"]) <= cutoff),
-                      key=lambda t: (t["event_time"], t["id"]))
+    eligible = sorted(((t, datetime.fromisoformat(t["event_time"]), float(t["quantity"])) for t in trades
+                       if datetime.fromisoformat(t["event_time"]) <= cutoff
+                       and datetime.fromisoformat(t["received_at"]) <= cutoff), key=lambda e: (e[1], e[0]["id"]))
     results = []
     for seconds in WINDOWS:
         start = cutoff - timedelta(seconds=seconds)
-        current = [t for t in eligible if datetime.fromisoformat(t["event_time"]) > start]
+        current_entries = []
+        buckets = [0.0] * BASELINE_WINDOWS
+        for t, event_time, quantity in eligible:
+            age = (cutoff - event_time).total_seconds()
+            if age < seconds:
+                current_entries.append((t, quantity))
+            else:
+                index = int(age // seconds) - 1
+                if index < BASELINE_WINDOWS:
+                    buckets[index] += quantity
+        current = [t for t, _ in current_entries]
         if not current:
             continue
-        buckets = []
-        for offset in range(1, BASELINE_WINDOWS + 1):
-            hi = start - timedelta(seconds=seconds * (offset - 1))
-            lo = hi - timedelta(seconds=seconds)
-            buckets.append(sum(float(t["quantity"]) for t in eligible if lo < datetime.fromisoformat(t["event_time"]) <= hi))
-        volume = sum(float(t["quantity"]) for t in current)
+        volume = sum(q for _, q in current_entries)
         baseline = median(buckets)
         mad = median(abs(x - baseline) for x in buckets)
         robust_z = (volume - baseline) / max(1, 1.4826 * mad)

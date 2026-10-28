@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 
 from .cases import completeness, report
 from .config import Settings
-from .investigations import replay
+from .investigations import replay, ReplayCapacityError
 from .normalization import canonical, digest, now, timestamp
 from .storage import Store, RawArchive
 
@@ -102,7 +102,10 @@ def create_app(settings=None):
             as_of = timestamp(body.as_of)
         except (ValueError, TypeError, OverflowError):
             raise HTTPException(422, "as_of must be a timezone-aware timestamp")
-        return await replay(store, body.venue, body.market_id, as_of)
+        try:
+            return await replay(store, body.venue, body.market_id, as_of, max_trades=settings.replay_max_trades)
+        except ReplayCapacityError as exc:
+            raise HTTPException(413, str(exc))
 
     @app.post("/information")
     async def information(body: Information):

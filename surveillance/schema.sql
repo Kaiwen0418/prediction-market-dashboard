@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS surveillance_trades (
  event_time timestamptz NOT NULL, received_at timestamptz NOT NULL,
  document jsonb NOT NULL, raw_id text REFERENCES surveillance_raw(id), PRIMARY KEY(venue,id)
 );
-CREATE INDEX IF NOT EXISTS surveillance_trade_window ON surveillance_trades(venue,market_id,event_time);
+DROP INDEX IF EXISTS surveillance_trade_window;
+CREATE INDEX IF NOT EXISTS surveillance_trade_replay ON surveillance_trades(venue,market_id,event_time,id);
 CREATE TABLE IF NOT EXISTS surveillance_jobs (
  id text PRIMARY KEY, kind text NOT NULL, venue text NOT NULL, payload jsonb NOT NULL,
  checkpoint jsonb NOT NULL DEFAULT '{}', due_at timestamptz NOT NULL DEFAULT now(),
@@ -43,3 +44,11 @@ CREATE TABLE IF NOT EXISTS surveillance_information (
  first_seen_at timestamptz NOT NULL DEFAULT now(), document jsonb NOT NULL,
  raw_id text REFERENCES surveillance_raw(id)
 );
+
+CREATE INDEX IF NOT EXISTS surveillance_rules_history ON surveillance_rules(venue,market_id,observed_at DESC);
+CREATE INDEX IF NOT EXISTS surveillance_cases_recent ON surveillance_cases(venue,market_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS surveillance_raw_path ON surveillance_raw(path);
+
+CREATE INDEX IF NOT EXISTS surveillance_raw_received ON surveillance_raw(received_at);
+
+CREATE INDEX IF NOT EXISTS surveillance_markets_open ON surveillance_markets(venue,id) WHERE document->>'closed'='false';

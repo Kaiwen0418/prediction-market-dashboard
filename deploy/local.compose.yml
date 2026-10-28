@@ -1,0 +1,73 @@
+name: prediction-market
+x-python: &python
+  image: prediction-market-python:local
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '2'
+services:
+  backend:
+    <<: *python
+    build:
+      context: ..
+      dockerfile: deploy/Python.Dockerfile
+    command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, '8000']
+    environment:
+      APP_ENV: development
+      ALLOW_ORIGINS: '["*"]'
+      MONITORING_HOT_MARKETS_PER_VENUE: '10'
+      MONITORING_WARM_MARKETS_PER_VENUE: '30'
+    ports: ['18000:8000']
+    mem_limit: 1g
+    cpus: 2
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: surveillance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: surveillance
+    volumes: ['database:/var/lib/postgresql/data']
+    mem_limit: 768m
+    cpus: 2
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=30, -c, max_wal_size=512MB]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U surveillance]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  surveillance-api:
+    <<: *python
+    command: [uvicorn, 'surveillance.api:create_app', --factory, --host, 0.0.0.0, --port, '8010']
+    environment: &surveillance-env
+      SURVEILLANCE_DATABASE_URL: postgresql://surveillance:${POSTGRES_PASSWORD}@postgres:5432/surveillance
+      SURVEILLANCE_RAW_DIR: /data/raw
+      SURVEILLANCE_API_TOKEN: ${SURVEILLANCE_API_TOKEN:?set SURVEILLANCE_API_TOKEN}
+      SURVEILLANCE_CONTRACTS: ${SURVEILLANCE_CONTRACTS:-20}
+    ports: ['18010:8010']
+    volumes: ['evidence:/data']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+    cpus: 1
+  surveillance-worker:
+    <<: *python
+    command: [python, -m, surveillance.cli, worker]
+    environment: *surveillance-env
+    volumes: ['evidence:/data']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 1g
+    cpus: 2
+volumes:
+  database:
+  evidence:

@@ -108,3 +108,13 @@ class CoreTests(unittest.TestCase):
         trades = [dict(trade("polymarket", dict(poly(), price=p), T.isoformat()), id=str(i))
                   for i, p in enumerate([0.1, 0.2, 0.3, 0.8, 0.9])]
         self.assertIsNone(evaluate(trades, T.isoformat())[0]["price_change"])
+
+    def test_identical_response_body_shares_blob_not_receipt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            archive = RawArchive(folder)
+            first = archive.write("kalshi", "one", {}, 200, b'{"same":1}', T.isoformat())
+            second = archive.write("kalshi", "two", {"cursor": "next"}, 200, b'{"same":1}', (T + timedelta(seconds=1)).isoformat())
+            self.assertEqual(first["path"], second["path"])
+            self.assertNotEqual(first["id"], second["id"])
+            self.assertNotEqual(first["received_at"], second["received_at"])
+            self.assertEqual(len(list(Path(folder).rglob("*.parquet"))), 1)

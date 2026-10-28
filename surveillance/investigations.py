@@ -10,13 +10,19 @@ ALTERNATIVES = ["Arbitrage or market making", "Thin order book", "Differences in
                 "Missing or delayed trades and clock uncertainty"]
 
 
-async def replay(store, venue, market_id, as_of, persist=True):
+class ReplayCapacityError(ValueError):
+    pass
+
+
+async def replay(store, venue, market_id, as_of, persist=True, max_trades=50000):
     cutoff = datetime.fromisoformat(as_of)
     if cutoff.tzinfo is None:
         raise ValueError("as_of must include timezone")
     rows = await store.fetch("""SELECT document,raw_id,id FROM surveillance_trades WHERE venue=%s AND market_id=%s
-        AND event_time<=%s AND received_at<=%s AND event_time>%s ORDER BY event_time,id""",
-        (venue, market_id, cutoff, cutoff, cutoff - timedelta(hours=13)))
+        AND event_time<=%s AND received_at<=%s AND event_time>%s ORDER BY event_time,id LIMIT %s""",
+        (venue, market_id, cutoff, cutoff, cutoff - timedelta(hours=13), max_trades + 1))
+    if len(rows) > max_trades:
+        raise ReplayCapacityError(f"Replay exceeds {max_trades} observed trades; no partial score produced")
     # Pin metadata to its observation time; current rules must not leak into replay.
     rules = await store.fetch("""SELECT * FROM surveillance_rules WHERE venue=%s AND market_id=%s AND observed_at<=%s
         ORDER BY observed_at DESC LIMIT 1""", (venue, market_id, cutoff))
@@ -31,20 +37,21 @@ async def replay(store, venue, market_id, as_of, persist=True):
     # Token/outcome grouping prevents interpreting a buy of NO as a buy of YES.
     groups = {}
     for row in rows:
-        t = dict(row["document"], id=row["id"])
+        t = dict(row["document"], id=row["id"], raw_id=row["raw_id"])
         groups.setdefault(t["token_id"] or t["outcome"], []).append(t)
     for outcome_key, trades in groups.items():
         for signal in evaluate(trades, cutoff.isoformat()):
             if signal["anomaly_score"] < 35:
                 continue
-            refs = [dict(trade_id=r["id"], raw_id=r["raw_id"]) for r in rows if r["id"] in signal["trade_ids"]]
+            signal_ids = set(signal["trade_ids"])
+            refs = [dict(trade_id=r["id"], raw_id=r["raw_id"]) for r in rows if r["id"] in signal_ids]
             quality = 30 + (15 if rules else 0) + (15 if signal["baseline_sufficient"] else 0)
             priority_tier = tier(rules[0]["document"]) if rules else 2
             wallet_observations = []
             if venue == "polymarket":
                 wallets = {}
                 for t in trades:
-                    if t["wallet"] and t["id"] in signal["trade_ids"]:
+                    if t["wallet"] and t["id"] in signal_ids:
                         wallets.setdefault(t["wallet"], []).append(t)
                 for wallet, activity in sorted(wallets.items()):
                     wallet_observations.append(dict(wallet=wallet, trade_count=len(activity),
@@ -59,6 +66,7 @@ async def replay(store, venue, market_id, as_of, persist=True):
                 rules=rules[0]["document"]["rules"] if rules else None, rules_hash=rules[0]["hash"] if rules else None,
                 rules_raw_id=rules[0]["raw_id"] if rules else None,
                 trade_references=refs, replay_input_ids=[t["id"] for t in trades],
+                replay_raw_ids=sorted({t["raw_id"] for t in trades if t.get("raw_id")}),
                 public_timeline=[r["document"] for r in info], supporting_evidence=[signal],
                 counter_evidence=[], alternative_explanations=[dict(explanation=x, status="unverified") for x in ALTERNATIVES],
                 open_questions=["Verify earliest public availability independently of our first_seen_at",

@@ -92,3 +92,11 @@ pnpm generate:state-support -- /tmp/presidential_general_averages_2024-09-12_unc
 - The frontend still supports its original Next route handlers for local or fallback use.
 - The FastAPI backend currently owns the live Polymarket proxy layer and NumPy analytics endpoints.
 - This split is intended to showcase both frontend systems thinking and backend/data-engineering ability.
+
+
+### Local test migration and independent surveillance
+
+The unmerged surveillance branch includes a local Docker Compose deployment for
+`frodo@192.168.1.131`. See [deployment instructions](deploy/README.md) and the
+[measured capacity assessment](docs/surveillance-capacity-2026-10-28.md).
+The Vercel production backend cutover remains pending the fixed public Tunnel.

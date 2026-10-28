@@ -16,3 +16,4 @@ backend/.env
 surveillance-data/
 surveillance/.env
 .venv-surveillance/
+deploy/.env

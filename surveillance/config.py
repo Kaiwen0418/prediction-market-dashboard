@@ -13,6 +13,11 @@ class Settings:
     poll_seconds: int = 60
     pages_per_job: int = 10
     api_token: str = ""
+    replay_max_trades: int = 50000
+    retention_days: int = 7
+    case_cooldown_seconds: int = 3600
+    catalog_seconds: int = 3600
+    closed_catalog_seconds: int = 604800
 
     @classmethod
     def env(cls):
@@ -21,8 +26,10 @@ class Settings:
             raw_dir=Path(os.getenv("SURVEILLANCE_RAW_DIR", "./surveillance-data")),
             contracts_per_venue=int(os.getenv("SURVEILLANCE_CONTRACTS", "100")),
             api_token=os.getenv("SURVEILLANCE_API_TOKEN", ""),
+            retention_days=int(os.getenv("SURVEILLANCE_RETENTION_DAYS", "7")),
+            replay_max_trades=int(os.getenv("SURVEILLANCE_REPLAY_MAX_TRADES", "50000")),
         )
 
     def __post_init__(self):
-        if self.contracts_per_venue < 1 or not 0 < self.exploration_fraction < 1:
+        if self.contracts_per_venue < 1 or self.retention_days < 1 or self.replay_max_trades < 1 or not 0 < self.exploration_fraction < 1:
             raise ValueError("Invalid collection budget")

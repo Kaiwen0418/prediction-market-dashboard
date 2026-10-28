@@ -1,4 +1,5 @@
-"""Budgeted selection over an unfiltered catalog, with rotating exploration."""
+"""Bounded-memory selection over an unfiltered catalog, with rotating exploration."""
+from bisect import insort
 from datetime import datetime, timezone
 import math
 
@@ -15,23 +16,47 @@ def tier(m):
     return 0 if any(k in text for k in P0) else 1 if any(k in text for k in P1) else 2
 
 
-def select(markets, budget=100, exploration_fraction=0.2, at=None):
-    at = at or datetime.now(timezone.utc)
-    eligible = [m for m in markets if not m["closed"] and (m["venue"] != "polymarket" or m["condition_id"])]
-    def rank(m):
+class Selector:
+    """Keep at most 2*budget documents while scanning any catalog size."""
+    def __init__(self, budget=100, exploration_fraction=0.2, at=None):
+        self.at = at or datetime.now(timezone.utc)
+        self.budget = budget
+        self.exploration = min(max(1, round(budget * exploration_fraction)), budget)
+        self.deep, self.explore = [], []
+        self.epoch = self.at.strftime("%Y-%m-%dT%H")
+
+    def rank(self, m):
         urgency = 0
         if m.get("end_time"):
             try:
-                hours = (datetime.fromisoformat(m["end_time"].replace("Z", "+00:00")) - at).total_seconds() / 3600
+                hours = (datetime.fromisoformat(m["end_time"].replace("Z", "+00:00")) - self.at).total_seconds() / 3600
                 urgency = 1 / (1 + max(hours, 0))
             except ValueError:
                 pass
-        # Volume is a small availability proxy; it cannot remove quiet markets.
         return (2 - tier(m)) * 10 + urgency + min(math.log1p(float(m["volume"])) / 100, 1)
-    exploration = min(max(1, round(budget * exploration_fraction)), budget)
-    deep = sorted(eligible, key=lambda m: (-rank(m), m["id"]))[:budget - exploration]
-    selected = {m["id"] for m in deep}
-    # Hourly rotation is stable across restarts and independent of volume.
-    epoch = at.strftime("%Y-%m-%dT%H")
-    remainder = sorted((m for m in eligible if m["id"] not in selected), key=lambda m: digest([epoch, m["id"]]))
-    return deep + remainder[:budget - len(deep)]
+
+    @staticmethod
+    def keep(pool, key, m, size):
+        if size and (len(pool) < size or key < pool[-1][0]):
+            insort(pool, (key, m))
+            if len(pool) > size:
+                pool.pop()
+
+    def add(self, m):
+        if m["closed"] or (m["venue"] == "polymarket" and not m["condition_id"]):
+            return
+        self.keep(self.deep, (-self.rank(m), m["id"]), m, self.budget - self.exploration)
+        # Keep budget random candidates so removing all deep picks still leaves enough.
+        self.keep(self.explore, (digest([self.epoch, m["id"]]), m["id"]), m, self.budget)
+
+    def result(self):
+        deep = [m for _, m in self.deep]
+        selected = {m["id"] for m in deep}
+        return deep + [m for _, m in self.explore if m["id"] not in selected][:self.budget - len(deep)]
+
+
+def select(markets, budget=100, exploration_fraction=0.2, at=None):
+    selector = Selector(budget, exploration_fraction, at)
+    for m in markets:
+        selector.add(m)
+    return selector.result()

@@ -1,0 +1,101 @@
+{
+  "workload": "synthetic case-producing fixture; not a live throughput guarantee",
+  "contracts": 200,
+  "trades": 200000,
+  "ingestion_seconds": 22.303,
+  "trades_per_second": 8967.2,
+  "page_p50_ms": 111.34,
+  "page_p95_ms": 128.32,
+  "replay_p50_ms": 139.53,
+  "replay_p95_ms": 162.45,
+  "replay_count": 20,
+  "max_rss_mib": 109.0,
+  "raw_bytes": 6080988,
+  "raw_bytes_per_trade": 30.4,
+  "relations_before_cases": [
+    {
+      "relname": "surveillance_case_versions",
+      "bytes": 16384
+    },
+    {
+      "relname": "surveillance_cases",
+      "bytes": 24576
+    },
+    {
+      "relname": "surveillance_coverage",
+      "bytes": 16384
+    },
+    {
+      "relname": "surveillance_information",
+      "bytes": 16384
+    },
+    {
+      "relname": "surveillance_jobs",
+      "bytes": 106496
+    },
+    {
+      "relname": "surveillance_markets",
+      "bytes": 237568
+    },
+    {
+      "relname": "surveillance_raw",
+      "bytes": 212992
+    },
+    {
+      "relname": "surveillance_rules",
+      "bytes": 278528
+    },
+    {
+      "relname": "surveillance_schema",
+      "bytes": 24576
+    },
+    {
+      "relname": "surveillance_trades",
+      "bytes": 147767296
+    }
+  ],
+  "relations_after_cases": [
+    {
+      "relname": "surveillance_case_versions",
+      "bytes": 532480
+    },
+    {
+      "relname": "surveillance_cases",
+      "bytes": 581632
+    },
+    {
+      "relname": "surveillance_coverage",
+      "bytes": 16384
+    },
+    {
+      "relname": "surveillance_information",
+      "bytes": 16384
+    },
+    {
+      "relname": "surveillance_jobs",
+      "bytes": 106496
+    },
+    {
+      "relname": "surveillance_markets",
+      "bytes": 237568
+    },
+    {
+      "relname": "surveillance_raw",
+      "bytes": 212992
+    },
+    {
+      "relname": "surveillance_rules",
+      "bytes": 278528
+    },
+    {
+      "relname": "surveillance_schema",
+      "bytes": 24576
+    },
+    {
+      "relname": "surveillance_trades",
+      "bytes": 147767296
+    }
+  ],
+  "case_count": 60,
+  "case_mean_json_bytes": 24350
+}

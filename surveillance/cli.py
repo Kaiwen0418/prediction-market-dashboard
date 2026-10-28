@@ -22,7 +22,7 @@ async def execute(args):
     elif args.command == "coverage":
         print(json.dumps(await completeness(store), default=str, indent=2))
     elif args.command == "replay":
-        result = await replay(store, args.venue, args.market, timestamp(args.as_of))
+        result = await replay(store, args.venue, args.market, timestamp(args.as_of), max_trades=settings.replay_max_trades)
         print(json.dumps(result, indent=2))
     elif args.command == "report":
         rows = await store.fetch("SELECT document FROM surveillance_cases WHERE id=%s", (args.case,))
@@ -30,10 +30,15 @@ async def execute(args):
             raise ValueError("Case not found")
         print(report(rows[0]["document"]))
     elif args.command == "verify":
-        rows = await store.fetch("SELECT * FROM surveillance_raw ORDER BY received_at")
-        for r in rows:
-            RawArchive.read(r)
-        print(json.dumps({"verified_responses": len(rows)}))
+        verified = 0
+        async with store.connection() as c:
+            async with c.cursor(name="verify") as cursor:
+                cursor.itersize = 256
+                await cursor.execute("SELECT * FROM surveillance_raw ORDER BY received_at")
+                async for r in cursor:
+                    RawArchive.read(r)
+                    verified += 1
+        print(json.dumps({"verified_responses": verified}))
 
 
 def main():

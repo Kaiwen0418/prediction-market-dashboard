@@ -21,11 +21,16 @@ class RawArchive:
     def write(self, venue, source, params, status, body, received_at=None):
         received_at = received_at or now()
         key = uuid.uuid4().hex
-        folder = self.root / venue / received_at[:10]
-        folder.mkdir(parents=True, exist_ok=True)
-        target = folder / f"{key}.parquet"
-        temporary = target.with_suffix(".tmp")
         checksum = hashlib.sha256(body).hexdigest()
+        folder = self.root / venue / "bodies" / checksum[:2]
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{checksum}.parquet"
+        record = dict(id=key, venue=venue, source=source, params=params, status=status, sha256=checksum,
+                      path=str(target), received_at=received_at)
+        if target.exists():
+            self.read(record)
+            return record
+        temporary = folder / f".{checksum}.{key}.tmp"
         table = pa.table({"body": [body], "source": [source], "received_at": [received_at], "sha256": [checksum]})
         try:
             pq.write_table(table, temporary, compression="zstd")
@@ -39,8 +44,7 @@ class RawArchive:
                 os.close(directory_fd)
         finally:
             temporary.unlink(missing_ok=True)
-        return dict(id=key, venue=venue, source=source, params=params, status=status, sha256=checksum,
-                    path=str(target), received_at=received_at)
+        return record
 
     @staticmethod
     def read(record):
@@ -127,12 +131,16 @@ class Store:
                     ON CONFLICT(venue,id) DO UPDATE SET document=EXCLUDED.document,
                     condition_id=EXCLUDED.condition_id,observed_at=EXCLUDED.observed_at,raw_id=EXCLUDED.raw_id""",
                     (m["venue"], m["id"], m["condition_id"], Jsonb(m), m["observed_at"], raw["id"]))
-                await c.execute("INSERT INTO surveillance_rules VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                    (m["venue"], m["condition_id"] or m["id"], m["rules_hash"], Jsonb(m), m["observed_at"], raw["id"]))
-            for t in trades:
-                await c.execute("""INSERT INTO surveillance_trades VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING""", (t["venue"], t["id"], t["market_id"], t["outcome"], t["event_time"],
-                                               t["received_at"], Jsonb(t), raw["id"]))
+                await c.execute("""INSERT INTO surveillance_rules SELECT %s,%s,%s,%s,%s,%s
+                    WHERE (SELECT hash FROM surveillance_rules WHERE venue=%s AND market_id=%s
+                           ORDER BY observed_at DESC LIMIT 1) IS DISTINCT FROM %s ON CONFLICT DO NOTHING""",
+                    (m["venue"], m["condition_id"] or m["id"], m["rules_hash"], Jsonb(m), m["observed_at"], raw["id"],
+                     m["venue"], m["condition_id"] or m["id"], m["rules_hash"]))
+            if trades:
+                async with c.cursor() as cursor:
+                    await cursor.executemany("""INSERT INTO surveillance_trades VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT DO NOTHING""", [(t["venue"], t["id"], t["market_id"], t["outcome"], t["event_time"],
+                                                   t["received_at"], Jsonb(t), raw["id"]) for t in trades])
             await c.execute("""UPDATE surveillance_jobs SET checkpoint=%s,lease_until=now()+interval '5 minutes',
                             updated_at=now() WHERE id=%s""", (Jsonb(checkpoint), job["id"]))
 
@@ -177,3 +185,22 @@ class Store:
             await c.execute("INSERT INTO surveillance_case_versions(case_id,version,document) VALUES(%s,%s,%s)",
                             (case_id, version, Jsonb(document)))
             return dict(document, version=version)
+
+    async def save_candidate(self, document, cooldown_seconds=3600):
+        """Coalesce automatic detections only. Explicit replay remains uncoalesced."""
+        async with self.connection() as c:
+            group = ":".join(str(document[k]) for k in ("venue", "market_id", "outcome_key"))
+            await c.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (group,))
+            recent = await (await c.execute("""SELECT document FROM surveillance_cases WHERE venue=%s AND market_id=%s
+                AND created_at>now()-(%s * interval '1 second') AND document->>'outcome_key'=%s
+                AND document->'signal'->>'window_seconds'=%s ORDER BY created_at DESC LIMIT 1""",
+                (document["venue"], document["market_id"], cooldown_seconds, str(document["outcome_key"]),
+                 str(document["signal"]["window_seconds"])))).fetchone()
+            if recent and document["anomaly_score"] < recent["document"]["anomaly_score"] + 20:
+                return False
+            await c.execute("""INSERT INTO surveillance_cases(id,venue,market_id,status,document)
+                VALUES(%s,%s,%s,'candidate',%s) ON CONFLICT DO NOTHING""",
+                (document["id"], document["venue"], document["market_id"], Jsonb(document)))
+            await c.execute("""INSERT INTO surveillance_case_versions(case_id,version,document)
+                VALUES(%s,1,%s) ON CONFLICT DO NOTHING""", (document["id"], Jsonb(document)))
+            return True

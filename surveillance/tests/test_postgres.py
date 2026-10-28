@@ -188,3 +188,53 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(jobs), 2)
         self.assertTrue(all("False" in r["payload"]["market_id"] for r in jobs))
         await worker.collector.close()
+
+    async def test_unchanged_rules_do_not_duplicate_but_reversions_survive(self):
+        job = await self.job(venue="kalshi")
+        raw = self.archive.write("kalshi", "test", {}, 200, b"{}")
+        t = datetime.now(timezone.utc)
+        old = market("kalshi", {"ticker": "c1", "event_ticker": "e1", "rules_primary": "old"}, t.isoformat())
+        await self.store.commit_page(job, raw, {}, markets=[old])
+        await self.store.commit_page(job, raw, {}, markets=[dict(old, observed_at=(t+timedelta(seconds=1)).isoformat())])
+        self.assertEqual(len(await self.store.fetch("SELECT * FROM surveillance_rules")), 1)
+        changed = market("kalshi", {"ticker": "c1", "event_ticker": "e1", "rules_primary": "new"}, (t+timedelta(seconds=2)).isoformat())
+        await self.store.commit_page(job, raw, {}, markets=[changed])
+        await self.store.commit_page(job, raw, {}, markets=[dict(old, observed_at=(t+timedelta(seconds=3)).isoformat())])
+        self.assertEqual(len(await self.store.fetch("SELECT * FROM surveillance_rules")), 3)
+
+    async def test_automatic_case_coalescing_preserves_stronger_signal(self):
+        case = dict(id="case1", venue="kalshi", market_id="c1", outcome_key="yes", anomaly_score=40,
+                    signal={"window_seconds":60})
+        self.assertTrue(await self.store.save_candidate(case))
+        self.assertFalse(await self.store.save_candidate(dict(case, id="case2", anomaly_score=55)))
+        self.assertTrue(await self.store.save_candidate(dict(case, id="case3", anomaly_score=65)))
+        self.assertEqual(len(await self.store.fetch("SELECT * FROM surveillance_cases")), 2)
+
+    async def test_retention_preserves_referenced_and_shared_raw_blobs(self):
+        from surveillance.maintenance import prune
+        old_time = (datetime.now(timezone.utc)-timedelta(days=10)).isoformat()
+        old = self.archive.write("kalshi", "old", {}, 200, b"shared", old_time)
+        shared = self.archive.write("kalshi", "recent", {}, 200, b"shared")
+        unpinned = self.archive.write("kalshi", "old", {}, 200, b"unused", old_time)
+        pinned = self.archive.write("kalshi", "old", {}, 200, b"case input", old_time)
+        for raw in (old, shared, unpinned, pinned):
+            await self.store.raw(raw)
+        await self.store.save_case(dict(id="pin",venue="kalshi",market_id="c1",replay_raw_ids=[pinned["id"]]))
+        result = await prune(self.store)
+        self.assertEqual(result["expired_raw_receipts"], 2)
+        self.assertTrue(Path(shared["path"]).exists())
+        self.assertTrue(Path(pinned["path"]).exists())
+        self.assertFalse(Path(unpinned["path"]).exists())
+        self.assertEqual(len(await self.store.fetch("SELECT * FROM surveillance_raw")), 2)
+
+    async def test_replay_capacity_is_explicit_not_silent_truncation(self):
+        from surveillance.investigations import ReplayCapacityError
+        cutoff=datetime.now(timezone.utc)
+        job=await self.job(venue="kalshi")
+        raw=self.archive.write("kalshi","test",{},200,b"{}")
+        trades=[dict(trade("kalshi",kalshi(trade_id=str(i),ticker="c1",created_time=(cutoff-timedelta(seconds=10)).isoformat()),
+                          (cutoff-timedelta(seconds=1)).isoformat()),id=str(i)) for i in range(6)]
+        await self.store.commit_page(job,raw,{},trades=trades)
+        with self.assertRaises(ReplayCapacityError):
+            await replay(self.store,"kalshi","c1",cutoff.isoformat(),max_trades=5)
+        self.assertEqual(await self.store.fetch("SELECT * FROM surveillance_cases"),[])
