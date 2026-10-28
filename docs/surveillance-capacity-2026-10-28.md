@@ -109,5 +109,7 @@
 - Vercel 前端保留；目标固定域名已指定为 `predict-test.projext-echo.xyz`。
 - 临时 REST 验证入口为 `https://phil-dee-gathered-wake.trycloudflare.com`。它不是正式切换完成的标志。
 - Cloudflare Quick Tunnel 不支持 SSE、无 uptime 保证且重建时变更域名，因此正式切换必须使用固定 Tunnel：[Cloudflare 官方限制](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations)。
-- 本轮新安装的 Cloudflare / Vercel / Railway 操作接口尚未出现在可调用列表中。尚未创建正式 DNS 记录、修改 Vercel 生产环境或停用 Railway；这些是剩余迁移工作，不是待审批事项。
+- Cloudflare / Vercel / Railway 已安装插件，但服务操作接口仍未提供；CLI 也未登录，已发起官方登录流程作为替代。尚未创建正式 DNS 记录、修改 Vercel 生产环境或停用 Railway；这些是剩余迁移工作，不是待审批事项。
 - PR #15 保持 draft、未合并。未做测试数据备份、跨环境数据库搬迁或双写。
+
+补充验收：局域网 SSE 连续收到 3 条 `connected` 快照，间隔约 1 秒，均带请求市场的 orderbook summary。固定公网入口待登录后复用同一验证脚本验收。

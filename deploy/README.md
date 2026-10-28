@@ -79,8 +79,24 @@ Remove/stop the temporary Quick Tunnel after the named tunnel works.
 
 At this handoff, the local containers and temporary REST endpoint are live. Named
 tunnel/DNS creation, Vercel variable/redeployment and Railway shutdown remain to be
-performed after the newly connected app interfaces load into a new chat turn.
-This is a tool availability issue, not a request for new authorization.
+performed after authenticated service access is available. The installed plugins
+still expose no service operations in this chat, and CLI checks confirmed no login.
+Official CLI sign-in flows have been started instead; this is authentication,
+not a request for new migration authorization.
+
+For the CLI fallback, complete `cloudflared tunnel login` on the VM and select
+`projext-echo.xyz`, then run `bash deploy/install-named-tunnel.sh` on the VM. The
+installer creates/reuses the named tunnel, validates ingress, creates the DNS
+record and replaces the temporary user service. Generated `deploy/tunnel.yml`
+stays server-local. Verify streaming using:
+
+```sh
+python3 deploy/check-sse.py --base https://predict-test.projext-echo.xyz
+```
+
+For Vercel, rebuild the **existing production deployment** with the updated API
+variable. The draft branch differs from production in existing frontend files;
+do not deploy its working tree as part of this backend migration.
 
 ## Reproduce the measurements
 

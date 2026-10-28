@@ -5,7 +5,7 @@ ssh_host="${1:-frodo@192.168.1.131}"
 ssh_key="${PMI_SSH_KEY:-$HOME/.ssh/agentbench_codex_ed25519}"
 ssh -i "$ssh_key" "$ssh_host" 'mkdir -p ~/prediction-market-dashboard/public/data'
 rsync -az -e "ssh -i $ssh_key" \
-  --exclude='/deploy/.env' --exclude='**/__pycache__/***' --exclude='*.pyc' \
+  --exclude='/deploy/.env' --exclude='/deploy/tunnel.yml' --exclude='**/__pycache__/***' --exclude='*.pyc' \
   --include='/deploy/***' --include='/surveillance/***' \
   --include='/backend/' --include='/backend/app/***' --include='/backend/tests/***' \
   --include='/backend/requirements.txt' --include='/public/' --include='/public/data/***' \
