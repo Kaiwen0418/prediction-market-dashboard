@@ -47,56 +47,56 @@ For a deliberate fresh test reset, `docker compose ... down -v` removes this
 project's database and evidence volumes. There is no migration data to preserve.
 Do not use global Docker pruning or stop unrelated Compose projects.
 
-## Public endpoint and cutover
+## Public endpoint and completed cutover
 
-Approved hostname: **`predict-test.projext-echo.xyz`**.
-Create a separate named Cloudflare Tunnel pointing to `http://127.0.0.1:18000`.
-Add the proxied CNAME for `predict-test` to that tunnel's returned `<id>.cfargotunnel.com`
-target in the `projext-echo.xyz` zone. Run its connector as a persistent service on
-the development machine. The existing AgentBench tunnel need not be migrated.
+Public API: **`https://predict-test.project-echo.xyz`**.
+A proxied CNAME in the `project-echo.xyz` zone points to named Tunnel
+`63fae5cf-2ed7-43f3-9bb3-ee427d57aeb0` (`prediction-market-test`).
+The connector runs as `systemctl --user status pmi-api-tunnel` under frodo,
+with user lingering enabled. Its origin is `http://127.0.0.1:18000`.
+The earlier temporary Quick Tunnel has been replaced and is no longer running.
+The legacy Quick Tunnel unit in this folder is an unused example.
 
-The included `pmi-api-tunnel.service` is only the temporary Quick Tunnel used for
-REST verification. It auto-starts as a user service but creates a new hostname on
-restart and does not support SSE; do not use it as the final frontend backend.
-Replace it with the named tunnel when its credentials are available.
-
-Cutover uses the following concrete settings:
-
-```text
-NEXT_PUBLIC_API_BASE_URL=https://predict-test.projext-echo.xyz
-```
-
-Update this variable for the existing Vercel project's Production and Preview
-environments, then redeploy the existing frontend without merging PR #15. Next.js
-inlines `NEXT_PUBLIC_` values at build time; changing the variable alone is insufficient.
-
-Verify fixed-host `/health`, `/api/polymarket/market-context`,
-`/api/research/states/Arizona/summary?party=Republican`, and
-`/api/live/stream?slug=california-governor-election-2026` (SSE receives `event: snapshot`).
-Then verify normal browser selection and the new API origin in network traffic.
-Stop/remove the Railway test deployment once the frontend cutover succeeds.
-Remove/stop the temporary Quick Tunnel after the named tunnel works.
-
-At this handoff, the local containers and temporary REST endpoint are live. Named
-tunnel/DNS creation, Vercel variable/redeployment and Railway shutdown remain to be
-performed after authenticated service access is available. The installed plugins
-still expose no service operations in this chat, and CLI checks confirmed no login.
-Official CLI sign-in flows have been started instead; this is authentication,
-not a request for new migration authorization.
-
-For the CLI fallback, complete `cloudflared tunnel login` on the VM and select
-`projext-echo.xyz`, then run `bash deploy/install-named-tunnel.sh` on the VM. The
-installer creates/reuses the named tunnel, validates ingress, creates the DNS
-record and replaces the temporary user service. Generated `deploy/tunnel.yml`
-stays server-local. Verify streaming using:
+To configure the named tunnel on this machine after normal Cloudflare CLI login:
 
 ```sh
-python3 deploy/check-sse.py --base https://predict-test.projext-echo.xyz
+bash deploy/install-named-tunnel.sh
 ```
 
-For Vercel, rebuild the **existing production deployment** with the updated API
-variable. The draft branch differs from production in existing frontend files;
-do not deploy its working tree as part of this backend migration.
+The installer checks that the hostname belongs to the authenticated zone **before
+any mutation**. Cloudflared otherwise silently appends the selected zone to an
+out-of-zone hostname. It creates/reuses the named tunnel, validates ingress,
+creates the DNS record and installs `pmi-api-named-tunnel.service` as the user's
+`pmi-api-tunnel.service`. Generated `deploy/tunnel.yml` and connector credentials
+remain server-local and are excluded from source sync/version control.
+
+Production and Preview now share the following Vercel variable:
+
+```text
+NEXT_PUBLIC_API_BASE_URL=https://predict-test.project-echo.xyz
+```
+
+Production deployment `dpl_2BmnBiHkMQSEeFZm4Hy1Kq8QzWL8` rebuilt the existing
+production commit `77f887f2a413c2397cd5f98200c20fad27940862` on main.
+The draft branch was not deployed as frontend production and PR #15 was not merged.
+The production alias remains `https://prediction-market-intelligence-dash.vercel.app`.
+
+Verify streaming with the descriptive probe User-Agent (the zone rejects the
+stock Python urllib User-Agent):
+
+```sh
+python3 deploy/check-sse.py --base https://predict-test.project-echo.xyz
+```
+
+Fixed-host health, market context, catalog, research, readiness and SSE passed.
+Native browser fetch/EventSource, market selection and CORS passed. The browser
+made no requests to Railway. Screenshots are under `tmp/surveillance-migration/`.
+
+The former Railway service in project `determined-patience` is offline, with no
+active deployments or mounted volumes. Its GitHub source is disconnected, so
+future repository pushes do not restart it. Its previous health URL returns 404.
+No dataset export/import, backups, or dual writes were performed.
+See [final verification](../docs/local-migration-2026-10-28.md).
 
 ## Reproduce the measurements
 

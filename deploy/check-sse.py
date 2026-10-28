@@ -10,7 +10,8 @@ def check(base, slug, count):
     url=base.rstrip('/')+'/api/live/stream?'+urllib.parse.urlencode({'slug':slug})
     started=time.monotonic()
     snapshots=[]
-    with urllib.request.urlopen(url,timeout=15) as response:
+    request=urllib.request.Request(url,headers={'User-Agent':'PredictionMarketMigrationCheck/1.0','Accept':'text/event-stream','Cache-Control':'no-cache'})
+    with urllib.request.urlopen(request,timeout=15) as response:
         content_type=response.headers.get('content-type','')
         if not content_type.startswith('text/event-stream'):
             raise RuntimeError('Expected SSE content type')

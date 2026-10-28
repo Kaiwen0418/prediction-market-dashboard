@@ -103,13 +103,14 @@
 - 每小时清理有批量上限。若输入增速超过清理速度，磁盘仍会增长；引用保护和尚未清理的孤立文件也可能使保留期延长。只运行一个采集/维护 worker，避免内容寻址文件清理与其他写入者竞态。
 - 增至 100 合约/平台前，应先看真实请求时延、任务到期积压、每日新增成交、正文唯一比例和磁盘日增量，再决定并发、轮询周期与预算。
 
-## 迁移状态
+## 迁移状态（已完成）
 
-- 本地开发机已运行 backend / PostgreSQL / surveillance API / surveillance worker。
-- Vercel 前端保留；目标固定域名已指定为 `predict-test.projext-echo.xyz`。
-- 临时 REST 验证入口为 `https://phil-dee-gathered-wake.trycloudflare.com`。它不是正式切换完成的标志。
-- Cloudflare Quick Tunnel 不支持 SSE、无 uptime 保证且重建时变更域名，因此正式切换必须使用固定 Tunnel：[Cloudflare 官方限制](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations)。
-- Cloudflare / Vercel / Railway 已安装插件，但服务操作接口仍未提供；CLI 也未登录，已发起官方登录流程作为替代。尚未创建正式 DNS 记录、修改 Vercel 生产环境或停用 Railway；这些是剩余迁移工作，不是待审批事项。
-- PR #15 保持 draft、未合并。未做测试数据备份、跨环境数据库搬迁或双写。
-
-补充验收：局域网 SSE 连续收到 3 条 `connected` 快照，间隔约 1 秒，均带请求市场的 orderbook summary。固定公网入口待登录后复用同一验证脚本验收。
+- 开发机运行 backend / PostgreSQL / surveillance API / surveillance worker，深度采集预算仍为每个平台 20 个合约。
+- Vercel 前端保留，Production 和 Preview 共用 API 地址为 `https://predict-test.project-echo.xyz`。
+- 固定命名 Tunnel `prediction-market-test` 已建立，DNS 为 proxied CNAME。临时 Quick Tunnel 已被替换。
+- Vercel 生产重建沿用原 main 提交 `77f887f`，新部署 `dpl_2BmnBiHkMQSEeFZm4Hy1Kq8QzWL8` 为 READY；PR #15 仍 draft、未合并。
+- 公网健康、目录、市场上下文、research、readiness 均为 200；公网和浏览器 SSE 均连续收到 3 条 connected 快照，约每秒一条。
+- 正式页面切换交易对通过，运行时异常为 0；流量已确认进入新域名，未再请求 Railway。
+- Railway 旧服务为 Offline，无活动部署，GitHub 来源已断开，原健康地址为 404。没有迁移旧数据、备份、双写或搬迁其他应用。
+- 初次填写域名与已授权 zone 拼写不同，CLI 曾自动生成错误的长记录；该记录已删除，并新增了在任何修改前验证 zone 的检查。
+- 详见 [最终迁移验证](local-migration-2026-10-28.md)。容量与长期观察边界仍按上文执行；迁移成功不代表已经完成七天检测校准。

@@ -14,9 +14,17 @@ uvicorn app.main:app --reload
 
 Open `http://localhost:8000/docs`.
 
-## Railway deployment
+## Current shared test deployment
 
-Recommended Railway service setup:
+The backend runs on `frodo@192.168.1.131`, published at
+`https://predict-test.project-echo.xyz` through a named Cloudflare Tunnel.
+Run `./deploy/update-local.sh` from the repository root to update the Compose stack.
+See [operations](../deploy/README.md). The old Railway deployment is offline and
+its GitHub source is disconnected; no Railway data was migrated.
+
+## Legacy Railway deployment (retired)
+
+Historical Railway service setup:
 
 - Root directory: `backend`
 - Builder: `Nixpacks`
