@@ -13,3 +13,6 @@ __pycache__
 *.pyc
 .env.local
 backend/.env
+surveillance-data/
+surveillance/.env
+.venv-surveillance/

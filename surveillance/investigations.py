@@ -1,0 +1,72 @@
+from datetime import datetime, timedelta
+
+from .detectors import evaluate, VERSION
+from .discovery import tier
+from .normalization import digest
+
+
+ALTERNATIVES = ["Arbitrage or market making", "Thin order book", "Differences in settlement rules",
+                "Earlier public disclosure or media syndication delay", "Live broadcast / score feed delay",
+                "Missing or delayed trades and clock uncertainty"]
+
+
+async def replay(store, venue, market_id, as_of, persist=True):
+    cutoff = datetime.fromisoformat(as_of)
+    if cutoff.tzinfo is None:
+        raise ValueError("as_of must include timezone")
+    rows = await store.fetch("""SELECT document,raw_id,id FROM surveillance_trades WHERE venue=%s AND market_id=%s
+        AND event_time<=%s AND received_at<=%s AND event_time>%s ORDER BY event_time,id""",
+        (venue, market_id, cutoff, cutoff, cutoff - timedelta(hours=13)))
+    # Pin metadata to its observation time; current rules must not leak into replay.
+    rules = await store.fetch("""SELECT * FROM surveillance_rules WHERE venue=%s AND market_id=%s AND observed_at<=%s
+        ORDER BY observed_at DESC LIMIT 1""", (venue, market_id, cutoff))
+    catalog = await store.fetch("""SELECT document FROM surveillance_markets WHERE venue=%s AND (id=%s OR condition_id=%s)
+        AND observed_at<=%s LIMIT 1""", (venue, market_id, market_id, cutoff))
+    if not rules and catalog:
+        rules = await store.fetch("""SELECT * FROM surveillance_rules WHERE venue=%s AND market_id=%s AND observed_at<=%s
+            ORDER BY observed_at DESC LIMIT 1""", (venue, catalog[0]["document"]["id"], cutoff))
+    info = await store.fetch("""SELECT document FROM surveillance_information WHERE venue=%s AND market_id=%s
+        AND first_seen_at<=%s ORDER BY first_seen_at,id""", (venue, market_id, cutoff))
+    cases = []
+    # Token/outcome grouping prevents interpreting a buy of NO as a buy of YES.
+    groups = {}
+    for row in rows:
+        t = dict(row["document"], id=row["id"])
+        groups.setdefault(t["token_id"] or t["outcome"], []).append(t)
+    for outcome_key, trades in groups.items():
+        for signal in evaluate(trades, cutoff.isoformat()):
+            if signal["anomaly_score"] < 35:
+                continue
+            refs = [dict(trade_id=r["id"], raw_id=r["raw_id"]) for r in rows if r["id"] in signal["trade_ids"]]
+            quality = 30 + (15 if rules else 0) + (15 if signal["baseline_sufficient"] else 0)
+            priority_tier = tier(rules[0]["document"]) if rules else 2
+            wallet_observations = []
+            if venue == "polymarket":
+                wallets = {}
+                for t in trades:
+                    if t["wallet"] and t["id"] in signal["trade_ids"]:
+                        wallets.setdefault(t["wallet"], []).append(t)
+                for wallet, activity in sorted(wallets.items()):
+                    wallet_observations.append(dict(wallet=wallet, trade_count=len(activity),
+                        volume_shares=sum(float(t["quantity"]) for t in activity),
+                        earliest_in_anomaly_window=min(t["event_time"] for t in activity),
+                        scope="Observed anomaly window only; not wallet creation or full history"))
+            document = dict(id=digest([VERSION, venue, market_id, outcome_key, signal["window_seconds"], cutoff.isoformat()]),
+                venue=venue, market_id=market_id, outcome_key=outcome_key, signal=signal,
+                anomaly_score=signal["anomaly_score"], evidence_quality=quality,
+                investigation_priority=round(signal["anomaly_score"] * (0.5 + quality / 200) * (1 - priority_tier * 0.1), 2),
+                score_meaning="Triage scores; none is a probability of insider trading",
+                rules=rules[0]["document"]["rules"] if rules else None, rules_hash=rules[0]["hash"] if rules else None,
+                rules_raw_id=rules[0]["raw_id"] if rules else None,
+                trade_references=refs, replay_input_ids=[t["id"] for t in trades],
+                public_timeline=[r["document"] for r in info], supporting_evidence=[signal],
+                counter_evidence=[], alternative_explanations=[dict(explanation=x, status="unverified") for x in ALTERNATIVES],
+                open_questions=["Verify earliest public availability independently of our first_seen_at",
+                                "Check collection gaps before interpreting the anomaly"],
+                orderbook_coverage="not_collected; historical sweeps cannot be inferred",
+                wallet_observations=wallet_observations, investigation_timeline=[],
+                wallet_capability="public proxy wallet only" if venue == "polymarket" else "unavailable", status="candidate")
+            if persist:
+                await store.save_case(document)
+            cases.append(document)
+    return cases
