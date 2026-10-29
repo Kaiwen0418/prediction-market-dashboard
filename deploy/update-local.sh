@@ -17,9 +17,12 @@ from pathlib import Path
 import secrets
 p=Path("deploy/.env")
 if not p.exists():
-    p.write_text("POSTGRES_PASSWORD="+secrets.token_hex(24)+"\nSURVEILLANCE_API_TOKEN="+secrets.token_hex(32)+"\nSURVEILLANCE_CONTRACTS=20\n")
+    p.write_text("POSTGRES_PASSWORD="+secrets.token_hex(24)+"\nSURVEILLANCE_API_TOKEN="+secrets.token_hex(32)+"\nSURVEILLANCE_CONTRACTS=100\n")
     p.chmod(0o600)
 PY
 docker compose --env-file deploy/.env -f deploy/local.compose.yml build backend
+docker compose --env-file deploy/.env -f deploy/local.compose.yml up -d --wait postgres
+docker compose --env-file deploy/.env -f deploy/local.compose.yml stop surveillance-worker
+docker compose --env-file deploy/.env -f deploy/local.compose.yml run --rm --no-deps surveillance-worker python -m surveillance.cli recover-worker
 docker compose --env-file deploy/.env -f deploy/local.compose.yml up -d --no-build
 docker compose --env-file deploy/.env -f deploy/local.compose.yml ps'

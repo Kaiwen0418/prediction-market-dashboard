@@ -196,3 +196,12 @@ Normal `update-local.sh` does not reset data. PostgreSQL and raw budgets remain
 20 GiB / 5 GiB with the existing 80%→60% eviction policy. Detailed rules for old
 selected contracts still expire by capacity/retention policy; catalogs are not a
 complete historical inventory.
+
+
+Surveillance schema 3 uses 100 deep contracts per venue and independent public global
+trade walks. Set `SURVEILLANCE_CONTRACTS=100` in the existing `deploy/.env` to override
+an older 20-contract setting; the update script preserves private credentials and
+existing operator overrides. Wide capture and deep fallback have separate queue
+cadences (15s after completed global walks, 900s deep fallback, 1800s rules), with
+explicit cursor backlog and source lag in coverage. Update now stops the sole worker
+and releases abandoned leases before bringing it back; checkpoints and data remain.

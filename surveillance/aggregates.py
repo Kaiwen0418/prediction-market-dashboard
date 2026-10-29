@@ -15,7 +15,7 @@ async def dirty(c, trades):
             await cursor.executemany('INSERT INTO surveillance_dirty_bins VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING', sorted(bins))
 
 
-async def materialize(store, limit=500):
+async def materialize(store, limit=2000):
     """Bound work per queue claim. Receipt time and materialization time are distinct."""
     count = 0
     async with store.connection() as c:

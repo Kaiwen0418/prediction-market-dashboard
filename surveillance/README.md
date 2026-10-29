@@ -149,7 +149,7 @@ workers can claim disjoint jobs, but rate limiting is process-local; do not scal
 workers without a shared rate budget. No WebSocket authentication is configured.
 Reports expose REST sampling and unavailable order-book coverage explicitly.
 
-Schema initialization is idempotent through version 2; future incompatible changes need
+Schema initialization is idempotent through version 3; future incompatible changes need
 an explicit versioned migration. Use a dedicated database, not the dashboard database.
 The single worker performs bounded hourly retention: cases/coverage/paused jobs expire
 at 7 days, trades/unreferenced raw at 8 days, with retained-case inputs and current
@@ -164,7 +164,7 @@ without a partial score. Configure `SURVEILLANCE_REPLAY_MAX_TRADES` only after m
 memory. `SURVEILLANCE_RETENTION_DAYS` controls test-data retention (default 7).
 
 See `deploy/README.md` and `docs/surveillance-capacity-2026-10-28.md` for the local
-machine deployment and measured costs. The deployment uses 20 contracts per venue.
+machine deployment and measured costs. The deployment uses 100 event-diverse deep contracts per venue plus independent global trade discovery.
 
 ## Validation
 
@@ -216,7 +216,7 @@ public disclosure. Uncalibrated review scores are `null`.
 
 Five-minute trade bins are sparse and versioned by actual materialization time. Late
 fills append a correction without rewriting past versions. The global worker job
-processes at most 500 dirty bins per claim every 30 seconds. Bootstrapping indexes the
+processes at most 2,000 dirty bins per claim every 30 seconds. Bootstrapping indexes the
 retained seven-day trade window once; historical investigations can explicitly queue
 older retained source rows:
 
@@ -249,3 +249,79 @@ and cross-platform rule equivalence remain outside this implementation.
 
 Run `python -m surveillance.research.benchmark_review` inside the API container for
 a disposable isolated-schema benchmark of the actual SQL/materialization/review path.
+
+
+## Broad discovery and selection correction (schema 3)
+
+Public global trade pagination now runs independently for both venues; it does not
+require a deep-selected contract. It starts with a five-minute lookback, overlaps
+60 event-time seconds between walks, and saves cursors/counts with the fills in one
+transaction. Each claim processes at most two pages. A pending cursor denotes a
+walk still being consumed, not a caught-up platform feed. Upstream indexing latency
+and revisions older than the overlap remain limitations. `feed_head_at` is the actual
+newest returned event; received time is kept separately. Global feeds may contain
+combinations or recently closed contracts; deep eligibility still excludes source
+closed/settled/nontradable/combo markets.
+
+Deep capacity defaults to 100 per venue. Selection requires one unambiguous native
+event ID, caps each event at two contracts, reserves 20% for low-activity exploration,
+and allocates the remaining pool across information/sports/civic strata. Ten percent
+of capacity can promote previously unselected contracts with observed broad cash
+activity. Promotion cash and recent/prior observations are triage inputs, not an
+insider score. Low-activity means reported 24h native volume <=1,000, falling back to
+reported lifetime volume; venue units differ and are never treated as comparable
+cash. Unknown volume is not assumed to be observed zero.
+
+Missing/ambiguous event metadata goes to a bounded enrichment queue instead of being
+counted as an independent event. At most 20 active lookup jobs per venue are admitted;
+three failures finish an unresolved lookup. Unmapped global trades remain retained.
+The selector keeps a bounded candidate pool; when a stratum lacks eligible events,
+unused deep capacity falls back to the other available strata and exposes actual
+allocation in coverage. Hourly-hash churn was replaced with six-hour exploration
+rotation plus a preference for existing selections. A past schedule lowers ranking;
+explicit source lifecycle controls eligibility.
+
+Gamma details now use an exact-ID filtered market list with events/tags. Omitted
+metadata fields preserve their prior value, per-field source receipt and observation
+time; explicit empty values can clear them. Legacy nonempty metadata inherits its
+previous index source. These raw references join retention and capacity eviction.
+`nominal` no longer matches nomination; ordinary election "win" no longer means P0.
+Classification remains a transparent heuristic using structured metadata and words.
+
+The global worker prioritizes wide capture, selection, aggregates and detection over
+background metadata/history requests. Deep trade fallback runs every 900 seconds,
+rule detail every 1,800 seconds; these are queue delays, not guaranteed poll deadlines.
+Cold deep contracts request one hour of history, with incomplete baseline exposed.
+The existing 13-hour replay query does not imply that 13 hours were collected.
+Use explicit backfill for longer investigations. Global collection remains active
+between these fallback requests. Configuration overrides:
+`SURVEILLANCE_CONTRACTS`, `SURVEILLANCE_DEEP_POLL_SECONDS`,
+`SURVEILLANCE_DETAIL_SECONDS`, `SURVEILLANCE_WIDE_POLL_SECONDS`.
+
+`GET /selection` exposes each current deep contract and its selection reason.
+`GET /coverage` distinguishes catalog, broad observations, deep event allocation,
+unmapped candidates, page-budget gaps and aggregation backlog. For read-only runtime
+snapshots run `python -m surveillance.research.live_coverage` in the API container.
+Actual deep count, distinct event count and broad observed contracts are separate.
+
+Deployment stops the sole worker before releasing stale leases, preserving all
+checkpoints. SIGTERM cancels the active claim and releases it before shutdown.
+`python -m surveillance.cli recover-worker` is an operator command for a stopped sole
+worker; never run it against a worker still executing claims. No database reset is
+part of deployment. Scout counters retain roughly 30-90 minutes between maintenance
+passes, represent deduplicated observed fills, and are disposable under capacity
+pressure. They are not used as historical replay scores.
+
+
+Live probes on 2026-10-29 observed `Cache-Control: public, max-age=300` on
+Polymarket global and filtered trade responses. Poll cadence is not source freshness.
+Selected response cache headers are retained with the raw receipt; coverage exposes
+`wide_freshness` with actual head-event age, receipt age and cursor state. A 200 from
+an endpoint, or a completed historical walk, never establishes sub-minute discovery.
+No cache-busting parameters or header-based freshness guarantees are assumed.
+
+
+Exact-ID/condition metadata lookup explicitly retries `closed=true` when the default
+open listing is empty, then uses the individual ID endpoint if needed. This preserves
+historical investigations and recognizes selected contracts that have just closed;
+it never treats an empty open listing as proof that the contract does not exist.
