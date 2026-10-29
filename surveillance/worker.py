@@ -8,6 +8,7 @@ import signal
 from .collectors import Collector, ContractError
 from .discovery import Selector,event_key,theme
 from .detectors import automatic_candidate
+from .money import cash
 from .investigations import replay, ReplayCapacityError
 from .maintenance import prune
 from .capacity import CapacityGuard
@@ -52,7 +53,11 @@ class Worker:
                 FROM surveillance_markets m JOIN surveillance_raw r ON r.id=m.raw_id
                 WHERE m.venue='polymarket' AND m.document->'event_ids'='[]'::jsonb
                     AND r.source ~ '/markets/[0-9]+$' LIMIT 500 ON CONFLICT DO NOTHING""")
+        await self.store.enqueue('slow-wallets','slow_wallets','polymarket',{})
+        await self.store.enqueue('wallet-results','wallet_results','polymarket',{})
+        await self.store.enqueue('cash-v2-bootstrap','cash_bootstrap','system',{})
         for venue in ("polymarket", "kalshi"):
+            await self.store.enqueue(f'candidate-scan:{venue}','candidate_scan',venue,{})
             await self.store.enqueue(f'wide:{venue}:v2','wide',venue,{'scope':'global'})
             await self.store.enqueue(f"schedule:{venue}", "schedule", venue, {})
         async with self.store.connection() as c:
@@ -61,8 +66,8 @@ class Worker:
 
     async def schedule(self, venue):
         activity=await self.store.fetch("""SELECT market_id,
-            COALESCE(sum(cash) FILTER(WHERE bucket>=date_trunc('minute',now())-interval '5 minutes'),0) AS recent_cash,
-            COALESCE(sum(cash) FILTER(WHERE bucket<date_trunc('minute',now())-interval '5 minutes'),0) AS prior_cash,
+            COALESCE(sum(cash) FILTER(WHERE bucket=date_bin(interval '5 minutes',now(),timestamptz '2000-01-01')-interval '5 minutes'),0) AS recent_cash,
+            COALESCE(sum(cash) FILTER(WHERE bucket=date_bin(interval '5 minutes',now(),timestamptz '2000-01-01')-interval '10 minutes'),0) AS prior_cash,
             max(last_event) AS last_event FROM surveillance_scout
             WHERE venue=%s AND bucket>=now()-interval '15 minutes' GROUP BY market_id""", (venue,))
         scouts={r['market_id']:r for r in activity}
@@ -120,7 +125,7 @@ class Worker:
     async def resolve_unknowns(self,venue,trades):
         amounts={}
         for t in trades:
-            amounts[t['market_id']]=amounts.get(t['market_id'],Decimal(0))+Decimal(t['price'])*Decimal(t['quantity'])
+            amounts[t['market_id']]=amounts.get(t['market_id'],Decimal(0))+(cash(t) or Decimal(0))
         keys=[k for k,v in sorted(amounts.items(),key=lambda kv:kv[1],reverse=True) if v>=1000][:20]
         if not keys:return
         async with self.store.connection() as c:
@@ -169,11 +174,17 @@ class Worker:
             else:
                 cp.setdefault('legacy_walk', bool(cp.get('cursor')) and not cp.get('walk_upper'))
                 cp.setdefault('walk_upper', raw['received_at'])
+                if cp.get('walk_pages',0)==0:
+                    import re
+                    headers=raw.get('response_headers',{})
+                    ttl=re.search(r'max-age=(\d+)',headers.get('cache-control',''))
+                    age=float(headers.get('age') or (ttl.group(1) if ttl else 0))
+                    cp['empty_sample_until']=(datetime.fromisoformat(raw['received_at'])-timedelta(seconds=max(0,age))).isoformat()
                 cp.setdefault('walk_lower', datetime.fromtimestamp(cp['since'], timezone.utc).isoformat())
                 cp['walk_pages'] = cp.get('walk_pages', 0) + 1
                 cp['walk_raw_ids'] = (cp.get('walk_raw_ids', []) + [raw['id']])[:64]
                 normalized = [trade(job["venue"], r, raw["received_at"]) for r in rows]
-                if job['kind']=='wide' and normalized and cp['walk_pages']==1:
+                if normalized and cp['walk_pages']==1:
                     cp['feed_head_at']=normalized[0]['event_time']
                 previous = cp.get("last_time")
                 counts = Counter(cp.get("counts", {}))
@@ -206,8 +217,9 @@ class Worker:
                 completed_walk = None
                 if exhausted or not cursor:
                     completed_walk = dict(lower_time=cp['walk_lower'], upper_time=cp['walk_upper'],
-                        raw_ids=cp['walk_raw_ids'], refs_complete=cp['walk_pages']<=64,observed_trades=cp['walk_trades'])
-                    if cp.get('legacy_walk') or job['kind']=='wide':
+                        raw_ids=cp['walk_raw_ids'],refs_complete=cp['walk_pages']<=64,observed_trades=cp['walk_trades'],
+                        source_upper=min(cp['walk_upper'],cp['feed_head_at']) if cp.get('feed_head_at') and cp['feed_head_at']>cp['walk_lower'] else cp.get('empty_sample_until'))
+                    if cp.get('legacy_walk'):
                         completed_walk = None
                     overlap=self.settings.wide_overlap_seconds if job['kind']=='wide' else 300
                     cp={"since":max(cp['since'],high_watermark-overlap),"completed_at":raw['received_at'],
@@ -261,6 +273,11 @@ class Worker:
                 try:
                     result = await build_review(self.store, job['payload']['information_id'], job['payload']['as_of'],job['payload'].get('contract_only',False))
                     checkpoint = {'case_id': result['id'], 'completed_at': datetime.now(timezone.utc).isoformat()}
+                    from .longitudinal import record_event
+                    try:
+                        checkpoint['wallet_event_review']=await record_event(self.store,job['payload']['information_id'],job['payload']['as_of'])
+                    except ValueError as exc:
+                        checkpoint['wallet_event_review']={'status':'unavailable','reason':str(exc)}
                 except ValueError as exc:
                     # Invalid/expired inputs and explicit work caps require a new request,
                     # rather than unbounded retries of the same immutable cutoff.
@@ -274,6 +291,41 @@ class Worker:
             elif job['kind'] == 'wallet':
                 from .wallets import collect_profile
                 delay = await collect_profile(self, job)
+            elif job['kind']=='cash_bootstrap':
+                async with self.store.connection() as c:
+                    await c.execute("""INSERT INTO surveillance_dirty_bins
+                        SELECT DISTINCT venue,market_id,COALESCE(NULLIF(document->>'token_id',''),outcome),
+                            to_timestamp((floor(extract(epoch FROM event_time)/300)+1)*300)
+                        FROM surveillance_trades WHERE venue='kalshi' AND event_time>=now()-interval '7 days'
+                        ON CONFLICT DO NOTHING""")
+                    await c.execute('UPDATE surveillance_jobs SET enabled=false WHERE id=%s',(job['id'],))
+                delay=3600
+            elif job['kind']=='wallet_results':
+                from .longitudinal import record_event
+                cp=job['checkpoint']
+                rows=await self.store.fetch("""SELECT id,first_seen_at FROM surveillance_information
+                    WHERE venue='polymarket' AND document->>'publication_time_verified'='true'
+                    AND first_seen_at>now()-interval '7 days'
+                    AND (first_seen_at,id)>(%s::timestamptz,%s) ORDER BY first_seen_at,id LIMIT 20""",
+                    (cp.get('after_time','1970-01-01T00:00:00+00:00'),cp.get('after_id','')))
+                results=[]
+                for r in rows:
+                    try:results.append(await record_event(self.store,r['id'],datetime.now(timezone.utc).isoformat(),refresh_resolution=True))
+                    except ValueError as exc:results.append({'status':'unavailable','reason':str(exc)})
+                checkpoint=dict(results=results)
+                if len(rows)==20:checkpoint.update(after_time=rows[-1]['first_seen_at'].isoformat(),after_id=rows[-1]['id'])
+                from .longitudinal import refresh_pattern_cases
+                checkpoint['patterns']=await refresh_pattern_cases(self.store)
+                await self.store.checkpoint(job,checkpoint)
+                delay=60 if len(rows)==20 else 3600
+            elif job['kind']=='candidate_scan':
+                from .screening import scan
+                await self.store.checkpoint(job,await scan(self.store,job['venue']))
+                delay=60
+            elif job['kind']=='slow_wallets':
+                from .longitudinal import find_accumulations
+                await self.store.checkpoint(job,await find_accumulations(self.store))
+                delay=3600
             elif job["kind"] == "maintenance":
                 result = await prune(self.store, self.settings.retention_days)
                 await self.store.checkpoint(job, result)
@@ -281,13 +333,17 @@ class Worker:
             elif job["kind"] == "schedule":
                 await self.schedule(job["venue"])
                 delay = 300
-            elif job["kind"] == "detect":
+            elif job["kind"] in ("detect","scout_detect"):
                 # Fixed UTC minute makes duplicate executions idempotent.
-                as_of = datetime.now(timezone.utc).replace(second=0, microsecond=0).isoformat()
-                cases = await replay(self.store, job["venue"], job["payload"]["market_id"], as_of, persist=False, max_trades=self.settings.replay_max_trades)
+                from .observation import latest_cutoff
+                knowledge=datetime.now(timezone.utc)
+                event_cutoff=await latest_cutoff(self.store,job['venue'],knowledge,job['payload']['market_id'])
+                as_of=event_cutoff.isoformat()
+                cases = await replay(self.store, job["venue"], job["payload"]["market_id"], as_of,persist=False,max_trades=self.settings.replay_max_trades,knowledge_cutoff=knowledge.isoformat())
                 new_cases = 0
                 eligible_cases = [case for case in cases if automatic_candidate(case["signal"], self.settings.automatic_min_cash_usd)]
                 for case in eligible_cases:
+                    case.update(detected_at=datetime.now(timezone.utc).isoformat(),analysis_mode='delayed_observation' if knowledge-event_cutoff>timedelta(seconds=60) else 'online')
                     created = await self.store.save_candidate(case, self.settings.case_cooldown_seconds)
                     new_cases += int(created)
                     if created:
@@ -295,8 +351,18 @@ class Worker:
                         await admit_profile(self.store, case)
                 await self.store.checkpoint(job, {"as_of": as_of, "detected": len(cases),
                     "new_cases": new_cases, "coalesced": len(eligible_cases) - new_cases,
-                    "suppressed_by_cost_floor": len(cases) - len(eligible_cases),
+                    "suppressed_by_cost_or_coverage": len(cases) - len(eligible_cases),
+                    "suppressed_by_cost_floor":sum(case["signal"]["cash_notional_usd"]<self.settings.automatic_min_cash_usd or (case["signal"]["trade_count"]<5 and case["signal"]["cash_notional_usd"]<10000) for case in cases),
+                    "knowledge_cutoff":knowledge.isoformat(),
+                    "event_window_delay_seconds":(knowledge-event_cutoff).total_seconds(),
+                    "current_sampled_candidates":sum(bool(case["signal"]["current_fully_observed"]) for case in cases),
                     "automatic_min_cash_usd": self.settings.automatic_min_cash_usd})
+                if new_cases:
+                    async with self.store.connection() as c:
+                        await c.execute("UPDATE surveillance_jobs SET due_at=LEAST(due_at,now()) WHERE id=%s",('schedule:'+job['venue'],))
+                if job['kind']=='scout_detect':
+                    async with self.store.connection() as c:
+                        await c.execute('UPDATE surveillance_jobs SET enabled=false WHERE id=%s',(job['id'],))
                 if cases:
                     # Escalation stays within the selected per-platform contract budget.
                     async with self.store.connection() as c:
@@ -322,7 +388,7 @@ class Worker:
             logger.warning("Job %s failed (%s)", job["id"], type(exc).__name__)
             await self.store.coverage(job["venue"], "error", {"error": reason, "checkpoint_preserved": True}, job["id"])
             backoff = min(3600, 60 * 2 ** min(job["failures"], 5))
-            if (job['payload'].get('lookup') or job['payload'].get('reason')=='restore omitted catalog metadata') and job['failures']>=2:
+            if (job['payload'].get('lookup') or job['payload'].get('reason') in ('restore omitted catalog metadata','verified event settlement refresh')) and job['failures']>=2:
                 async with self.store.connection() as c:
                     await self.store.fence(c,job)
                     await c.execute('UPDATE surveillance_jobs SET enabled=false WHERE id=%s',(job['id'],))

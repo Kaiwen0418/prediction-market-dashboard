@@ -4,6 +4,7 @@ from decimal import Decimal
 from math import ceil
 
 from .aggregates import read_bins
+from .money import cash
 from .investigations import ALTERNATIVES
 from .normalization import digest, now, timestamp
 
@@ -126,15 +127,15 @@ async def build_review(store, information_id, as_of, contract_only=False):
                             and start<=r['event_time']<anchor and (r['event_time']<first or r['event_time']>=last)]
                 sums = {k:sum((Decimal(b['document'][k]) for b in selected),Decimal(0)) for k in ('cash','buy_cash','sell_cash')}
                 for r in boundary:
-                    t=r['document']; cash=Decimal(t['price'])*Decimal(t['quantity'])
-                    sums['cash']+=cash
+                    t=r['document']; amount=cash(t)
+                    sums['cash']+=amount or 0
                     if not t.get('is_block_trade') and t.get('direction') in (1,-1):
-                        sums['buy_cash' if t['direction']==1 else 'sell_cash']+=cash
+                        sums['buy_cash' if t['direction']==1 else 'sell_cash']+=amount or 0
                 for b in selected:
                     refs.update(b['raw_ids'])
                 refs.update(r['raw_id'] for r in boundary)
                 stats.append(dict(outcome=outcome, fills=sum(b['document']['fills'] for b in selected)+len(boundary),
-                    **{k:str(v) for k,v in sums.items()}, sampled_trade_bins=len(selected),
+                    **{k:str(v) if all(b['document'].get('cash_complete',True) and (venue!='kalshi' or b['document'].get('aggregation_version')=='cash-v2') for b in selected) and all(cash(r['document']) is not None for r in boundary) else None for k,v in sums.items()}, sampled_trade_bins=len(selected),
                     refs_complete=all(b['document']['refs_complete'] for b in selected)))
             has_fills = any(s['fills']>0 for s in stats)
             for statistic in stats:

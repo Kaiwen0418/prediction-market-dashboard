@@ -106,3 +106,28 @@ ALTER TABLE surveillance_markets ADD COLUMN IF NOT EXISTS metadata_raw_ids text[
 CREATE INDEX IF NOT EXISTS surveillance_market_metadata_raw ON surveillance_markets USING gin(metadata_raw_ids);
 
 ALTER TABLE surveillance_raw ADD COLUMN IF NOT EXISTS response_headers jsonb NOT NULL DEFAULT '{}';
+
+CREATE TABLE IF NOT EXISTS surveillance_observations (
+ id text PRIMARY KEY,venue text NOT NULL,market_id text,
+ lower_time timestamptz NOT NULL,upper_time timestamptz NOT NULL,
+ known_at timestamptz NOT NULL,raw_ids text[] NOT NULL,refs_complete boolean NOT NULL
+);
+CREATE INDEX IF NOT EXISTS surveillance_observation_window ON surveillance_observations(venue,market_id,upper_time);
+CREATE INDEX IF NOT EXISTS surveillance_observation_raw ON surveillance_observations USING gin(raw_ids);
+CREATE TABLE IF NOT EXISTS surveillance_wallet_daily (
+ wallet text NOT NULL,market_id text NOT NULL,outcome text NOT NULL,outcome_label text NOT NULL,day date NOT NULL,
+ known_at timestamptz NOT NULL,first_event timestamptz NOT NULL,last_event timestamptz NOT NULL,
+ fills bigint NOT NULL,buy_cash numeric NOT NULL,sell_cash numeric NOT NULL,
+ buy_shares numeric NOT NULL,sell_shares numeric NOT NULL,max_fill_cash numeric NOT NULL,
+ raw_ids text[] NOT NULL,refs_complete boolean NOT NULL,
+ PRIMARY KEY(wallet,market_id,outcome,day)
+);
+CREATE INDEX IF NOT EXISTS surveillance_wallet_daily_recent ON surveillance_wallet_daily(known_at);
+CREATE INDEX IF NOT EXISTS surveillance_wallet_daily_raw ON surveillance_wallet_daily USING gin(raw_ids);
+CREATE TABLE IF NOT EXISTS surveillance_wallet_events (
+ wallet text NOT NULL,event_key text NOT NULL,known_at timestamptz NOT NULL,
+ document jsonb NOT NULL,raw_ids text[] NOT NULL,PRIMARY KEY(wallet,event_key,known_at)
+);
+CREATE INDEX IF NOT EXISTS surveillance_wallet_events_raw ON surveillance_wallet_events USING gin(raw_ids);
+CREATE INDEX IF NOT EXISTS surveillance_trade_wallet ON surveillance_trades(venue,(document->>'wallet'),event_time);
+INSERT INTO surveillance_schema VALUES(4) ON CONFLICT DO NOTHING;

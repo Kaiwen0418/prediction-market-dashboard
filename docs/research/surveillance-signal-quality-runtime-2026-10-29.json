@@ -1,0 +1,214 @@
+{
+  "at": "2026-10-29T16:46:29.862547+00:00",
+  "settings": {
+    "contracts_per_venue": 100,
+    "deep_poll_seconds": 900,
+    "detail_seconds": 1800,
+    "wide_poll_seconds": 15,
+    "pages_per_claim": 2
+  },
+  "usage": {
+    "database_bytes": 3219961523,
+    "raw_bytes": 388128528
+  },
+  "selection": {
+    "polymarket": {
+      "contracts": 100,
+      "events": 81,
+      "max_per_event": 2,
+      "unmapped": 0,
+      "themes": {
+        "sports": 53,
+        "information": 32,
+        "civic": 13,
+        "other": 2
+      },
+      "reasons": {
+        "stratum:sports": 26,
+        "wide_activity_promotion": 10,
+        "stratum:information": 31,
+        "stratum:civic": 13,
+        "low_activity_exploration": 20
+      }
+    },
+    "kalshi": {
+      "contracts": 100,
+      "events": 87,
+      "max_per_event": 2,
+      "unmapped": 0,
+      "themes": {
+        "sports": 42,
+        "information": 32,
+        "civic": 18,
+        "other": 8
+      },
+      "reasons": {
+        "low_activity_exploration": 20,
+        "stratum:information": 31,
+        "stratum:civic": 13,
+        "wide_activity_promotion": 10,
+        "stratum:sports": 26
+      }
+    }
+  },
+  "wide": [
+    {
+      "venue": "kalshi",
+      "retained_fills": 1726142,
+      "markets": 138688,
+      "newly_received_60s": 16223,
+      "latest_receipt": "2026-10-29 16:45:43.920432+00:00",
+      "latest_event": "2026-10-29 16:45:12.439260+00:00"
+    },
+    {
+      "venue": "polymarket",
+      "retained_fills": 188318,
+      "markets": 9931,
+      "newly_received_60s": 0,
+      "latest_receipt": "2026-10-29 16:43:12.184475+00:00",
+      "latest_event": "2026-10-29 16:43:02+00:00"
+    }
+  ],
+  "wide_jobs": [
+    {
+      "venue": "kalshi",
+      "kind": "wide",
+      "failures": 0,
+      "last_error": null,
+      "checkpoint": {
+        "since": 1793292252,
+        "http_age": null,
+        "completed_at": "2026-10-29T16:46:18.437480+00:00",
+        "feed_head_at": "2026-10-29T16:45:12.439260+00:00",
+        "cursor_pending": false,
+        "last_walk_fills": 52019,
+        "last_walk_pages": 53,
+        "high_watermark_at": "2026-10-29T16:45:12+00:00",
+        "http_cache_control": null,
+        "last_page_received_at": "2026-10-29T16:46:18.437480+00:00",
+        "first_page_received_at": "2026-10-29T16:45:12.671527+00:00"
+      }
+    },
+    {
+      "venue": "polymarket",
+      "kind": "wide",
+      "failures": 0,
+      "last_error": null,
+      "checkpoint": {
+        "since": 1793292122,
+        "http_age": "185",
+        "completed_at": "2026-10-29T16:46:12.443735+00:00",
+        "feed_head_at": "2026-10-29T16:43:02+00:00",
+        "cursor_pending": false,
+        "last_walk_fills": 3309,
+        "last_walk_pages": 4,
+        "high_watermark_at": "2026-10-29T16:43:02+00:00",
+        "http_cache_control": "public, max-age=300",
+        "last_page_received_at": "2026-10-29T16:46:12.443735+00:00",
+        "first_page_received_at": "2026-10-29T16:46:09.502104+00:00"
+      }
+    }
+  ],
+  "wide_pages_5m": [
+    {
+      "venue": "polymarket",
+      "pages_5m": 56
+    },
+    {
+      "venue": "kalshi",
+      "pages_5m": 176
+    }
+  ],
+  "detector_ages": [
+    {
+      "venue": "kalshi",
+      "completed": 83,
+      "p95_age_seconds": 4739.845807999997
+    },
+    {
+      "venue": "polymarket",
+      "completed": 82,
+      "p95_age_seconds": 2237.845808000001
+    }
+  ],
+  "observation_intervals": [
+    {
+      "venue": "kalshi",
+      "intervals": 3,
+      "oldest_sampled": "2026-10-29 13:11:56+00:00",
+      "source_head": "2026-10-29 16:45:47.083778+00:00",
+      "latest_known": "2026-10-29 16:46:18.488455+00:00"
+    },
+    {
+      "venue": "polymarket",
+      "intervals": 6,
+      "oldest_sampled": "2026-10-29 16:42:02+00:00",
+      "source_head": "2026-10-29 16:43:02+00:00",
+      "latest_known": "2026-10-29 16:46:12.522174+00:00"
+    }
+  ],
+  "multi_day": [
+    {
+      "daily_cells": 0,
+      "bytes": 40960,
+      "oldest_event": null,
+      "newest_event": null
+    }
+  ],
+  "case_kinds": [
+    {
+      "kind": "legacy",
+      "cases": 902
+    },
+    {
+      "kind": "event_review",
+      "cases": 1
+    }
+  ],
+  "first_pass": [
+    {
+      "venue": "kalshi",
+      "checkpoint": {
+        "scope": "Outside deep selection; sampled activity, not an insider classification",
+        "admitted": 20,
+        "candidates": 269,
+        "active_limit": 20,
+        "candidate_budget_exceeded": false
+      }
+    },
+    {
+      "venue": "polymarket",
+      "checkpoint": {
+        "scope": "Outside deep selection; sampled activity, not an insider classification",
+        "admitted": 20,
+        "candidates": 68,
+        "active_limit": 20,
+        "candidate_budget_exceeded": false
+      }
+    }
+  ],
+  "pending_bins": [
+    {
+      "n": 2884,
+      "closed_ready": 2383,
+      "oldest": "2026-10-29 16:45:00+00:00"
+    }
+  ],
+  "source_sha256": {
+    "worker.py": "20cfbcd6373cc1c9dc48c87125d3396a452f2908ca5334df92b9fed07adab28b",
+    "storage.py": "f0739b5ba2ca00a67b2255904bae22e025a67bcfc351363a9d2ff30220e511ba",
+    "discovery.py": "e2179073c140e0d2ea05b98ee02ee152d734555af9d2c4fb972f2c6a7013141b",
+    "collectors.py": "60dcc706676720a0adc322b9a4cdc67eb1c4585e7f563425214b2975c83376cf",
+    "normalization.py": "e781fd0ca0669f1b42a48838af02b8b6b316bfd26a011311bd4a49db7116c0b8",
+    "schema.sql": "8dcac52e51c3b7820d8141b8456516476def1b4b54e04dd8a7b0deaeb6a7e6aa",
+    "aggregates.py": "352012b1c578a5d1eaab5e76ad37ecf71a6227a38262d7b38149c464bcdc90f3",
+    "config.py": "392dc7450f80cab0c09881f814268ce54116481941ffe22e938fd4ead5d16ce1",
+    "detectors.py": "74292cf8b637e36a8bf0984cbb78f01606e214d4b27f1c3cc2e9194117ba59d1",
+    "observation.py": "12a6caa13ad0fe9389f634eb54d08219ef6466d520610e4446559bd888811d24",
+    "screening.py": "babc561f78950d7ed670a99e4438c11dbca836378de299817dd41da1092a1d59",
+    "longitudinal.py": "637a06aafe119858defaca2df2c69e42185c067b0df22868cd2f67812b835aa7",
+    "money.py": "df9c02ae5910643251fef36a3c333eb70f7d6d0b10ad1628b364480faf522ddc",
+    "investigations.py": "f89980ed7e7807f94fd5da62697733be1384d2175804276733ac3c8ecd7f1edb"
+  },
+  "caveat": "Bounded REST observations; counts are not platform coverage percentages; startup includes metadata repair/history warmup"
+}

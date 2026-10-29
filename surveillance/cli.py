@@ -75,7 +75,7 @@ async def execute(args):
     elif args.command == "coverage":
         print(json.dumps(await completeness(store), default=str, indent=2))
     elif args.command == "replay":
-        result = await replay(store, args.venue, args.market, timestamp(args.as_of), max_trades=settings.replay_max_trades)
+        result = await replay(store, args.venue, args.market, timestamp(args.as_of), max_trades=settings.replay_max_trades,knowledge_cutoff=timestamp(args.knowledge_cutoff) if args.knowledge_cutoff else None)
         print(json.dumps(result, indent=2))
     elif args.command == "report":
         rows = await store.fetch("SELECT document FROM surveillance_cases WHERE id=%s", (args.case,))
@@ -119,6 +119,7 @@ def main():
     replay_parser.add_argument("--venue", choices=("polymarket", "kalshi"), required=True)
     replay_parser.add_argument("--market", required=True)
     replay_parser.add_argument("--as-of", required=True)
+    replay_parser.add_argument("--knowledge-cutoff",help="Optional later receipt cutoff; never backdates the alert")
     report_parser = commands.add_parser("report")
     report_parser.add_argument("--case", required=True)
     args = parser.parse_args()

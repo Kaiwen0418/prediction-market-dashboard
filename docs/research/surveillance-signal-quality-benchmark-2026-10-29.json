@@ -1,0 +1,23 @@
+{
+  "measured_at": "2026-10-29T16:41:54.633491+00:00",
+  "daily_row_limit": 200000,
+  "daily_storage": {
+    "rows": 200000,
+    "bytes": 66535424
+  },
+  "synthetic_seed_seconds": 0.8787652086466551,
+  "batch_1000_fills_at_capacity_seconds": {
+    "median": 0.0698001948185265,
+    "max": 0.08267046185210347
+  },
+  "slow_scan_at_capacity_seconds": 0.3571878164075315,
+  "detector_50000_fills_seconds": {
+    "median": 0.1248405147343874,
+    "max": 0.12618648866191506
+  },
+  "limitations": [
+    "Synthetic disposable schema on shared VM; not a sustained production growth forecast",
+    "Daily cells are hard-admission capped; cases, evidence arrays and WAL have separate costs",
+    "Existing cells continue at cap; unseen cells are skipped with hourly coverage telemetry"
+  ]
+}
