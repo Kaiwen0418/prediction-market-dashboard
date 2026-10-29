@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-29T16:48:57.668856+00:00",
+  "at": "2026-10-29T16:54:07.013023+00:00",
   "settings": {
     "contracts_per_venue": 100,
     "deep_poll_seconds": 900,
@@ -8,8 +8,8 @@
     "pages_per_claim": 2
   },
   "usage": {
-    "database_bytes": 3283809971,
-    "raw_bytes": 392443667
+    "database_bytes": 3370284723,
+    "raw_bytes": 397678754
   },
   "selection": {
     "polymarket": {
@@ -24,49 +24,49 @@
         "other": 2
       },
       "reasons": {
-        "stratum:sports": 26,
         "wide_activity_promotion": 10,
         "stratum:information": 31,
+        "stratum:sports": 26,
         "stratum:civic": 13,
         "low_activity_exploration": 20
       }
     },
     "kalshi": {
       "contracts": 100,
-      "events": 86,
+      "events": 82,
       "max_per_event": 2,
       "unmapped": 0,
       "themes": {
-        "sports": 42,
         "other": 8,
-        "civic": 18,
-        "information": 32
+        "sports": 42,
+        "information": 32,
+        "civic": 18
       },
       "reasons": {
-        "wide_activity_promotion": 10,
-        "stratum:sports": 26,
         "low_activity_exploration": 20,
-        "stratum:civic": 13,
-        "stratum:information": 31
+        "wide_activity_promotion": 10,
+        "stratum:information": 31,
+        "stratum:sports": 26,
+        "stratum:civic": 13
       }
     }
   },
   "wide": [
     {
       "venue": "kalshi",
-      "retained_fills": 1760546,
-      "markets": 141787,
-      "newly_received_60s": 12772,
-      "latest_receipt": "2026-10-29 16:48:46.603339+00:00",
-      "latest_event": "2026-10-29 16:48:40.450098+00:00"
+      "retained_fills": 1808933,
+      "markets": 145768,
+      "newly_received_60s": 5781,
+      "latest_receipt": "2026-10-29 16:53:33.392741+00:00",
+      "latest_event": "2026-10-29 16:53:24.430753+00:00"
     },
     {
       "venue": "polymarket",
-      "retained_fills": 196125,
-      "markets": 10150,
-      "newly_received_60s": 7807,
-      "latest_receipt": "2026-10-29 16:48:30.131253+00:00",
-      "latest_event": "2026-10-29 16:48:19+00:00"
+      "retained_fills": 200820,
+      "markets": 10329,
+      "newly_received_60s": 4695,
+      "latest_receipt": "2026-10-29 16:53:36.329714+00:00",
+      "latest_event": "2026-10-29 16:53:22+00:00"
     }
   ],
   "wide_jobs": [
@@ -76,28 +76,17 @@
       "failures": 0,
       "last_error": null,
       "checkpoint": {
-        "since": 1793292426,
+        "since": 1793292744,
         "http_age": null,
-        "last_time": 1793292467,
-        "walk_lower": "2026-10-29T16:47:06+00:00",
-        "walk_pages": 10,
-        "walk_upper": "2026-10-29T16:48:40.693975+00:00",
-        "legacy_walk": false,
-        "walk_trades": 10000,
-        "completed_at": "2026-10-29T16:48:24.679757+00:00",
-        "feed_head_at": "2026-10-29T16:48:40.450098+00:00",
-        "cursor_pending": true,
-        "high_watermark": 1793292520,
-        "head_event_time": "2026-10-29T16:48:40+00:00",
-        "last_page_fills": 1000,
-        "last_walk_fills": 16172,
-        "last_walk_pages": 17,
-        "high_watermark_at": "2026-10-29T16:48:06+00:00",
-        "last_page_markets": 213,
-        "empty_sample_until": "2026-10-29T16:48:40.693975+00:00",
+        "completed_at": "2026-10-29T16:53:56.896944+00:00",
+        "feed_head_at": "2026-10-29T16:53:24.430753+00:00",
+        "cursor_pending": false,
+        "last_walk_fills": 15306,
+        "last_walk_pages": 16,
+        "high_watermark_at": "2026-10-29T16:53:24+00:00",
         "http_cache_control": null,
-        "last_page_received_at": "2026-10-29T16:48:49.105726+00:00",
-        "first_page_received_at": "2026-10-29T16:48:06.682303+00:00"
+        "last_page_received_at": "2026-10-29T16:53:56.896944+00:00",
+        "first_page_received_at": "2026-10-29T16:53:24.681117+00:00"
       }
     },
     {
@@ -106,64 +95,64 @@
       "failures": 0,
       "last_error": null,
       "checkpoint": {
-        "since": 1793292439,
-        "http_age": "5",
-        "completed_at": "2026-10-29T16:48:38.384439+00:00",
-        "feed_head_at": "2026-10-29T16:48:19+00:00",
+        "since": 1793292742,
+        "http_age": "25",
+        "completed_at": "2026-10-29T16:53:55.629757+00:00",
+        "feed_head_at": "2026-10-29T16:53:22+00:00",
         "cursor_pending": false,
-        "last_walk_fills": 11116,
-        "last_walk_pages": 12,
-        "high_watermark_at": "2026-10-29T16:48:19+00:00",
+        "last_walk_fills": 1279,
+        "last_walk_pages": 2,
+        "high_watermark_at": "2026-10-29T16:53:22+00:00",
         "http_cache_control": "public, max-age=300",
-        "last_page_received_at": "2026-10-29T16:48:38.384439+00:00",
-        "first_page_received_at": "2026-10-29T16:48:21.070920+00:00"
+        "last_page_received_at": "2026-10-29T16:53:55.629757+00:00",
+        "first_page_received_at": "2026-10-29T16:53:55.048019+00:00"
       }
     }
   ],
   "wide_pages_5m": [
     {
       "venue": "polymarket",
-      "pages_5m": 64
+      "pages_5m": 38
     },
     {
       "venue": "kalshi",
-      "pages_5m": 174
+      "pages_5m": 124
     }
   ],
   "detector_ages": [
     {
       "venue": "kalshi",
       "completed": 100,
-      "p95_age_seconds": 117.642459
+      "p95_age_seconds": 192.99034799999967
     },
     {
       "venue": "polymarket",
-      "completed": 98,
-      "p95_age_seconds": 1497.642459
+      "completed": 96,
+      "p95_age_seconds": 1881.990348
     }
   ],
   "observation_intervals": [
     {
-      "venue": "kalshi",
-      "intervals": 13,
-      "oldest_sampled": "2026-10-29 13:11:56+00:00",
-      "source_head": "2026-10-29 16:48:28.889012+00:00",
-      "latest_known": "2026-10-29 16:48:28.928954+00:00"
+      "venue": "polymarket",
+      "intervals": 32,
+      "oldest_sampled": "2026-10-29 15:35:53+00:00",
+      "source_head": "2026-10-29 16:53:22+00:00",
+      "latest_known": "2026-10-29 16:53:55.703498+00:00"
     },
     {
-      "venue": "polymarket",
-      "intervals": 14,
-      "oldest_sampled": "2026-10-29 15:35:53+00:00",
-      "source_head": "2026-10-29 16:48:19+00:00",
-      "latest_known": "2026-10-29 16:48:38.459894+00:00"
+      "venue": "kalshi",
+      "intervals": 21,
+      "oldest_sampled": "2026-10-29 13:11:56+00:00",
+      "source_head": "2026-10-29 16:53:24.430753+00:00",
+      "latest_known": "2026-10-29 16:53:56.953593+00:00"
     }
   ],
   "multi_day": [
     {
-      "daily_cells": 4067,
-      "bytes": 3694592,
+      "daily_cells": 6624,
+      "bytes": 5373952,
       "oldest_event": "2026-10-29 16:43:04+00:00",
-      "newest_event": "2026-10-29 16:48:19+00:00"
+      "newest_event": "2026-10-29 16:53:22+00:00"
     }
   ],
   "case_kinds": [
@@ -177,7 +166,7 @@
     },
     {
       "kind": "trade_anomaly",
-      "cases": 3
+      "cases": 28
     }
   ],
   "first_pass": [
@@ -185,8 +174,8 @@
       "venue": "kalshi",
       "checkpoint": {
         "scope": "Outside deep selection; sampled activity, not an insider classification",
-        "admitted": 20,
-        "candidates": 333,
+        "admitted": 19,
+        "candidates": 389,
         "active_limit": 20,
         "candidate_budget_exceeded": false
       }
@@ -195,8 +184,8 @@
       "venue": "polymarket",
       "checkpoint": {
         "scope": "Outside deep selection; sampled activity, not an insider classification",
-        "admitted": 0,
-        "candidates": 68,
+        "admitted": 6,
+        "candidates": 77,
         "active_limit": 20,
         "candidate_budget_exceeded": false
       }
@@ -204,9 +193,9 @@
   ],
   "pending_bins": [
     {
-      "n": 6353,
+      "n": 5842,
       "closed_ready": 0,
-      "oldest": "2026-10-29 16:50:00+00:00"
+      "oldest": "2026-10-29 16:55:00+00:00"
     }
   ],
   "source_sha256": {
@@ -221,9 +210,78 @@
     "detectors.py": "74292cf8b637e36a8bf0984cbb78f01606e214d4b27f1c3cc2e9194117ba59d1",
     "observation.py": "12a6caa13ad0fe9389f634eb54d08219ef6466d520610e4446559bd888811d24",
     "screening.py": "babc561f78950d7ed670a99e4438c11dbca836378de299817dd41da1092a1d59",
-    "longitudinal.py": "637a06aafe119858defaca2df2c69e42185c067b0df22868cd2f67812b835aa7",
+    "longitudinal.py": "b64d5375014bcfe0af967439ea3f3648525b6ce198c5d9aa44645ea9f8b464e4",
     "money.py": "df9c02ae5910643251fef36a3c333eb70f7d6d0b10ad1628b364480faf522ddc",
     "investigations.py": "f89980ed7e7807f94fd5da62697733be1384d2175804276733ac3c8ecd7f1edb"
   },
-  "caveat": "Bounded REST observations; counts are not platform coverage percentages; startup includes metadata repair/history warmup"
+  "caveat": "Bounded REST observations; counts are not platform coverage percentages; startup includes metadata repair/history warmup",
+  "earlier_sample": {
+    "at": "2026-10-29T16:48:57.668856+00:00",
+    "selection": {
+      "polymarket": {
+        "contracts": 100,
+        "events": 81,
+        "max_per_event": 2,
+        "unmapped": 0,
+        "themes": {
+          "sports": 53,
+          "information": 32,
+          "civic": 13,
+          "other": 2
+        },
+        "reasons": {
+          "stratum:sports": 26,
+          "wide_activity_promotion": 10,
+          "stratum:information": 31,
+          "stratum:civic": 13,
+          "low_activity_exploration": 20
+        }
+      },
+      "kalshi": {
+        "contracts": 100,
+        "events": 86,
+        "max_per_event": 2,
+        "unmapped": 0,
+        "themes": {
+          "sports": 42,
+          "other": 8,
+          "civic": 18,
+          "information": 32
+        },
+        "reasons": {
+          "wide_activity_promotion": 10,
+          "stratum:sports": 26,
+          "low_activity_exploration": 20,
+          "stratum:civic": 13,
+          "stratum:information": 31
+        }
+      }
+    },
+    "usage": {
+      "database_bytes": 3283809971,
+      "raw_bytes": 392443667
+    },
+    "multi_day": [
+      {
+        "daily_cells": 4067,
+        "bytes": 3694592,
+        "oldest_event": "2026-10-29 16:43:04+00:00",
+        "newest_event": "2026-10-29 16:48:19+00:00"
+      }
+    ],
+    "case_kinds": [
+      {
+        "kind": "legacy",
+        "cases": 902
+      },
+      {
+        "kind": "event_review",
+        "cases": 1
+      },
+      {
+        "kind": "trade_anomaly",
+        "cases": 3
+      }
+    ]
+  }
 }

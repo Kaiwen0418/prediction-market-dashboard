@@ -375,7 +375,9 @@ anchors are processed per hourly pass (60s continuation if paginated); per ancho
 considered. Unknown settlements queue <=20 pending one-off detail refreshes globally,
 with hourly cooldown and three source failures before stopping. Final outcomes
 require a final source status and exact valid outcome prices. Only independent
-native events count; the earliest retained verified anchor wins. Mismatches, mixed
+native events count; the earliest retained verified anchor wins, including anchors
+with zero observed fills. Earlier counter-evidence invalidates later-anchor matches
+and updates existing repeat candidates without erasing their historical versions. Mismatches, mixed
 exposure, unknown direction and unresolved events remain in the denominator.
 Three matching selected events may create a separate null-score review candidate.
 No retrospective result changes the original trading alert.

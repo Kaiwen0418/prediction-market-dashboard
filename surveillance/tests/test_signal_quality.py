@@ -153,7 +153,7 @@ class QualityPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result['events'][0]['document']['all_receipts_before_anchor'])
         self.assertEqual((await wallet_patterns(self.store,W,before))['unknown'],1)
         await self.info(anchor+timedelta(minutes=1),key='later')
-        self.assertEqual((await record_event(self.store,'later',now()))['status'],'earlier_verified_anchor_already_recorded')
+        self.assertEqual((await record_event(self.store,'later',now()))['redirected_to_earlier_verified_anchor'],'notice')
         self.assertEqual((await record_event(self.store,'notice',now()))['updated'],0)
 
     async def test_repeated_matches_include_losses_and_avoid_version_churn(self):
@@ -171,6 +171,14 @@ class QualityPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await refresh_pattern_cases(self.store))['pattern_candidates'],0)
         case=(await self.store.fetch('SELECT document FROM surveillance_cases'))[0]['document']
         self.assertIsNone(case['anomaly_score']);self.assertEqual(case['summary']['mismatches'],1)
+        await self.info(anchor-timedelta(hours=2),market_id='c0',key='earlier-counter-evidence')
+        await record_event(self.store,'earlier-counter-evidence',now())
+        self.assertEqual((await refresh_pattern_cases(self.store))['pattern_candidates'],1)
+        revised=(await self.store.fetch('SELECT document FROM surveillance_cases'))[0]['document']
+        self.assertEqual(revised['summary']['matches'],2)
+        self.assertFalse(revised['current_repeat_criterion_met'])
+        self.assertEqual(revised['detected_at'],case['detected_at'])
+        self.assertEqual((await refresh_pattern_cases(self.store))['pattern_candidates'],0)
 
     async def test_resolution_refresh_queue_is_bounded_and_not_reenabled_early(self):
         markets=[dict(id=str(i),resolved_outcome=None) for i in range(25)]
@@ -222,3 +230,21 @@ class QualityPostgresTests(unittest.IsolatedAsyncioTestCase):
         changed=dict(doc,id='v2',anomaly_score=50,signal=dict(window_seconds=60,detector_version='surveillance-v2.0'))
         self.assertTrue(await self.store.save_candidate(changed))
         self.assertFalse(await self.store.save_candidate(dict(changed,id='v2-duplicate')))
+
+
+    async def test_earlier_disclosure_without_fills_invalidates_later_wallet_matches(self):
+        anchor=datetime.now(timezone.utc)-timedelta(hours=2)
+        await self.catalog(resolved='Yes')
+        await self.intake('after-earliest',[anchor+timedelta(minutes=30)])
+        await self.info(anchor+timedelta(hours=1),key='later')
+        await record_event(self.store,'later',now())
+        before=now()
+        self.assertEqual((await wallet_patterns(self.store,W))['matches'],1)
+        await self.info(anchor,key='earliest')
+        redirected=await record_event(self.store,'later',now())
+        self.assertEqual(redirected['redirected_to_earlier_verified_anchor'],'earliest')
+        result=await wallet_patterns(self.store,W)
+        self.assertEqual((result['matches'],result['unknown']),(0,1))
+        self.assertEqual(result['events'][0]['document']['status'],'anchor_superseded')
+        self.assertEqual((await wallet_patterns(self.store,W,before))['matches'],1)
+        self.assertEqual((await record_event(self.store,'earliest',now()))['updated'],0)

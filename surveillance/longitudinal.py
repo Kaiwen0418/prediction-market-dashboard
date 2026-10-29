@@ -104,8 +104,16 @@ async def record_event(store,information_id,as_of,max_rows=50000,refresh_resolut
     resolution={r['document'].get('condition_id') or r['document']['id']:r for r in markets}
     if refresh_resolution:
         await queue_resolution(store,[r['document'] for r in markets])
-    earlier=await store.fetch('''SELECT document FROM surveillance_wallet_events WHERE event_key=%s
-        AND document->>'publication_anchor'<%s LIMIT 1''',(group,anchor.isoformat()))
+    earliest=await store.fetch('''SELECT id FROM surveillance_information WHERE venue='polymarket'
+        AND market_id=ANY(%s) AND first_seen_at<=%s AND document->>'publication_time_verified'='true'
+        AND (document->>'published_at')::timestamptz<%s
+        ORDER BY (document->>'published_at')::timestamptz,id LIMIT 1''',(members,cutoff,anchor))
+    if earliest:
+        # An earlier disclosure with zero trades still invalidates later anchors.
+        result=await record_event(store,earliest[0]['id'],as_of,max_rows,refresh_resolution)
+        return dict(result,redirected_to_earlier_verified_anchor=earliest[0]['id'])
+    earlier=await store.fetch('''SELECT document FROM surveillance_wallet_events WHERE event_key=%s AND known_at<=%s
+        AND document->>'publication_anchor'<%s LIMIT 1''',(group,cutoff,anchor.isoformat()))
     if earlier:return dict(status='earlier_verified_anchor_already_recorded')
     rows=await store.fetch('''SELECT document,raw_id,received_at FROM surveillance_trades WHERE venue='polymarket'
         AND market_id=ANY(%s) AND event_time>=%s AND event_time<%s AND received_at<=%s
@@ -116,6 +124,21 @@ async def record_event(store,information_id,as_of,max_rows=50000,refresh_resolut
         if re.fullmatch(r'0x[0-9a-fA-F]{40}',r['document'].get('wallet') or ''):wallets[r['document']['wallet'].lower()].append(r)
     ranked=sorted(wallets,key=lambda w:sum(float(cash(r['document']) or 0) for r in wallets[w]),reverse=True)[:50]
     updated=0
+    previous=await store.fetch('''SELECT DISTINCT ON(wallet) wallet,document,raw_ids FROM surveillance_wallet_events
+        WHERE event_key=%s AND known_at<=%s ORDER BY wallet,known_at DESC LIMIT 1001''',(group,cutoff))
+    if len(previous)>1000:raise ValueError('Event wallet invalidation budget exceeded; no partial result produced')
+    for row in previous:
+        old=row['document']
+        if row['wallet'] in ranked or dt(old['publication_anchor'])<=anchor:continue
+        doc=dict(old,status='anchor_superseded',information_id=information_id,publication_anchor=anchor.isoformat(),
+            actual_alert_before_anchor=None,all_receipts_before_anchor=False,observed_fills=0,positive_observed_outcomes=0,
+            gross_cash='0',knowledge_cutoff=cutoff.isoformat(),
+            invalidation='Earlier verified anchor superseded prior comparison; wallet absent from bounded current selection')
+        refs=sorted(set(row['raw_ids']+[i['raw_id']]+metadata_refs))
+        doc['content_hash']=digest([doc,refs])
+        async with store.connection() as c:
+            await c.execute('INSERT INTO surveillance_wallet_events VALUES(%s,%s,%s,%s,%s)',(row['wallet'],group,now(),Jsonb(doc),refs))
+        updated+=1
     for wallet in ranked:
         activity=wallets[wallet];positions=defaultdict(Decimal);labels={}
         refs=set(metadata_refs+[i['raw_id']]);gross=Decimal(0)
@@ -175,18 +198,19 @@ async def refresh_pattern_cases(store,limit=20):
     created=0
     for r in wallets:
         summary=await wallet_patterns(store,r['wallet'])
-        if not summary['repeated_settlement_matches']:continue
+        key=digest(['wallet-repeat-v1',r['wallet']])
+        old=await store.fetch('SELECT document FROM surveillance_cases WHERE id=%s',(key,))
+        if not summary['repeated_settlement_matches'] and not old:continue
         refs=sorted({rid for e in summary['events'] for rid in e['raw_ids']})
         if len(refs)>4096:continue  # Explicit API summary remains available; no unpinned auto dossier.
         first=summary['events'][0]['document']
-        key=digest(['wallet-repeat-v1',r['wallet']])
-        old=await store.fetch('SELECT document FROM surveillance_cases WHERE id=%s',(key,))
         doc=dict(id=key,kind='repeated_pre_anchor_matches',venue='polymarket',wallet=r['wallet'],
             market_id=first['market_ids'][0],status='candidate',summary={k:v for k,v in summary.items() if k!='events'},
             events=[e['document'] for e in summary['events']],replay_raw_ids=refs,
             detected_at=old[0]['document']['detected_at'] if old else now(),
             anomaly_score=None,evidence_quality=None,investigation_priority=None,
-            score_meaning='At least three selected, distinct native events with observed exposure matching settlement; no calibrated probability',
+            current_repeat_criterion_met=summary['repeated_settlement_matches'],
+            score_meaning='Selected independent-event comparison; current repeat qualification explicit, no calibrated probability',
             limitations=['Retrospectively known outcomes never change original trading alert scores',
                 'Includes mismatch/mixed/unknown counts; sample is selected and history may be partial',
                 'Pre-anchor event times are distinct from real alerts or receipts before publication'])
