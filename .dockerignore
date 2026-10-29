@@ -1,0 +1,12 @@
+.git
+node_modules
+.next
+out
+tmp
+.env*
+backend/.env
+surveillance/.env
+**/__pycache__
+**/*.pyc
+.venv*
+surveillance-data

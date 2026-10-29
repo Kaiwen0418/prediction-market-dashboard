@@ -94,6 +94,50 @@ export type LiveHistoryCase = {
     leadLagLabel: string;
     divergenceLabel: string;
   };
+  relatedMarketDivergence?: {
+    primary: {
+      label: string;
+      probability: number;
+      observedAt: string;
+      sourceUrl: string;
+    };
+    related: {
+      label: string;
+      probability: number;
+      observedAt: string;
+      sourceUrl: string;
+    };
+    rawProbabilitySum: number;
+    rawGapPoints: number;
+    feeBpsPerLeg: number;
+    feeBufferPoints: number;
+    actionableGapPoints: number;
+    liquidityUsd?: number | null;
+    minimumLiquidityUsd: number;
+    status: string;
+    explanation: string;
+  };
+  electionModelComparison?: {
+    modelName: string;
+    modelProbability: number;
+    marketProbability: number;
+    divergencePoints: number;
+    pollObservedAt: string;
+    marketObservedAt: string;
+    sourceUrl: string;
+    methodology: string;
+  };
+  catalysts?: Array<{
+    id: string;
+    headline: string;
+    eventType: string;
+    occurredAt: string;
+    sourceName: string;
+    sourceUrl: string;
+    matchedMarketTimestamp: string;
+    marketMove: number;
+    summary: string;
+  }>;
   sourceUrls: string[];
 };
 
@@ -362,10 +406,7 @@ async function getLiveHistoryCasesLocal(
         state: stateCase.state,
         eventSlug: stateCase.eventSlug,
         party,
-        summary:
-          analytics.source === "api"
-            ? `FiveThirtyEight ${party} state support matched against a pre-fetched Polymarket history snapshot for ${stateCase.state}, with lead-lag, correlation, and volatility computed by the FastAPI + NumPy backend.`
-            : `FiveThirtyEight ${party} state support matched against a pre-fetched Polymarket history snapshot for ${stateCase.state}. Analytics fell back to the local TypeScript implementation because the backend summary endpoint was unavailable.`,
+        summary: `FiveThirtyEight ${party} state support compared with Polymarket history for ${stateCase.state}, including lead-lag, correlation, and volatility analysis.`,
         analyticsSource: analytics.source,
         researchSource: "local" as const,
         marketSeries,
@@ -385,7 +426,7 @@ async function getLiveHistoryCasesLocal(
         narrative: {
           overview: `${stateCase.state} ${party.toLowerCase()} support is evaluated across ${coverage.alignedPoints} aligned daily observations from the cached frontend datasets.`,
           methodology:
-            "Poll and market series are date-aligned first, then analytics are computed through the available backend route or the local fallback engine."
+            "Poll and market series are aligned by date before lead-lag, volatility, event-window, and divergence measures are calculated."
         },
         researchHighlights: {
           shockLabel: `Primary shock window moved ${analytics.summary.eventWindow.netMove >= 0 ? "+" : ""}${analytics.summary.eventWindow.netMove} pts around ${analytics.summary.eventWindow.anchorTimestamp.slice(0, 10)}`,

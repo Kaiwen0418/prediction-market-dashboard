@@ -2,8 +2,15 @@ import type { MarketSnapshot, OrderbookState, TimelineEvent, TimePoint } from "@
 import type { PollPoint } from "@/types/poll";
 import { getNewsEvents } from "@/services/news/api";
 import { fetchEventMarketBySlug, fetchFeaturedMarketLive, fetchOrderbookLive, fetchPriceHistoryLive, fetchTradesLive } from "./rest";
-import { featuredMarket, marketSeries, pollSeries } from "./mockData";
-import { createOrderbookSnapshot } from "./mockData";
+import {
+  createMarketSeries,
+  createOrderbookSnapshot,
+  featuredMarket,
+  getMockMarketBySlug,
+  getMockMarketByTokenId,
+  marketSeries,
+  pollSeries
+} from "./mockData";
 import { normalizeTimelineFromMarket } from "./normalizers";
 
 function simulateLatency<T>(payload: T, delay = 200): Promise<T> {
@@ -27,7 +34,7 @@ export async function getFeaturedMarketStrict(): Promise<MarketSnapshot> {
 
 export async function getMarketBySlug(slug: string): Promise<MarketSnapshot> {
   const liveMarket = await fetchEventMarketBySlug(slug).catch(() => null);
-  return liveMarket ?? simulateLatency(featuredMarket);
+  return liveMarket ?? simulateLatency(getMockMarketBySlug(slug));
 }
 
 export async function getMarketBySlugStrict(slug: string): Promise<MarketSnapshot> {
@@ -43,18 +50,18 @@ export async function getHistoricalMarketSeries(tokenId?: string): Promise<TimeP
 
   const liveHistory = await fetchPriceHistoryLive(tokenId).catch(() => []);
   if (liveHistory.length > 1) return liveHistory;
-  return simulateLatency(marketSeries);
+  return simulateLatency(createMarketSeries(getMockMarketByTokenId(tokenId)));
 }
 
 export async function getHistoricalPollSeries(): Promise<PollPoint[]> {
   return simulateLatency(pollSeries);
 }
 
-export async function getOrderbookSnapshot(tokenId?: string): Promise<OrderbookState> {
+export async function getOrderbookSnapshot(tokenId?: string, conditionId?: string): Promise<OrderbookState> {
   if (tokenId) {
     const liveOrderbook = await fetchOrderbookLive(tokenId).catch(() => null);
     if (liveOrderbook) {
-      const liveTrades = await fetchTradesLive(tokenId).catch(() => []);
+      const liveTrades = conditionId ? await fetchTradesLive(conditionId).catch(() => []) : [];
       return {
         ...liveOrderbook,
         trades: liveTrades.length ? liveTrades : liveOrderbook.trades
@@ -62,10 +69,10 @@ export async function getOrderbookSnapshot(tokenId?: string): Promise<OrderbookS
     }
   }
 
-  return simulateLatency(createOrderbookSnapshot(), 180);
+  return simulateLatency(createOrderbookSnapshot(getMockMarketByTokenId(tokenId)), 180);
 }
 
-export async function getOrderbookSnapshotStrict(tokenId?: string): Promise<OrderbookState> {
+export async function getOrderbookSnapshotStrict(tokenId?: string, conditionId?: string): Promise<OrderbookState> {
   if (!tokenId) {
     throw new Error("Cannot load live orderbook without a live token id.");
   }
@@ -75,7 +82,7 @@ export async function getOrderbookSnapshotStrict(tokenId?: string): Promise<Orde
     throw new Error("Live orderbook request failed and no fallback is allowed.");
   }
 
-  const liveTrades = await fetchTradesLive(tokenId).catch(() => []);
+  const liveTrades = conditionId ? await fetchTradesLive(conditionId).catch(() => []) : [];
   return {
     ...liveOrderbook,
     trades: liveTrades.length ? liveTrades : liveOrderbook.trades

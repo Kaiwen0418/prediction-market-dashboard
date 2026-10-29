@@ -2,20 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { polymarketConfig } from "@/services/polymarket/config";
 import { proxyJson, validateProxyBaseUrls } from "../_lib/proxy";
 
-export const revalidate = 1;
+export const revalidate = 3;
 
 export async function GET(request: NextRequest) {
   const baseUrlError = validateProxyBaseUrls();
   if (baseUrlError) return baseUrlError;
 
-  const tokenId = request.nextUrl.searchParams.get("tokenId");
-  if (!tokenId) {
-    return NextResponse.json({ error: "tokenId is required" }, { status: 400 });
-  }
+  const conditionId = request.nextUrl.searchParams.get("conditionId");
+  const limitParam = request.nextUrl.searchParams.get("limit");
+  const requestedLimit =
+    limitParam === null ? Number.NaN : Number(limitParam);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(100, Math.max(1, Math.floor(requestedLimit)))
+    : 100;
 
-  const url = `${polymarketConfig.gammaBaseUrl}/trades?limit=20&market=${encodeURIComponent(tokenId)}`;
+  const url = `${polymarketConfig.dataApiBaseUrl}/trades?limit=${limit}&takerOnly=true${
+    conditionId ? `&market=${encodeURIComponent(conditionId)}` : ""
+  }`;
   try {
-    return await proxyJson(url);
+    return await proxyJson(url, {
+      revalidateSeconds: 3,
+      staleIfErrorSeconds: 15
+    });
   } catch {
     return NextResponse.json({ error: "Trades proxy request failed" }, { status: 502 });
   }

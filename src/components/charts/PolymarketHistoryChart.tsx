@@ -10,6 +10,7 @@ import { ReactECharts } from "./ChartContainer";
 type PolymarketHistoryChartProps = {
   events?: TimelineEvent[];
   series: TimePoint[];
+  venueName?: string;
 };
 
 type AnnotationPlacement = {
@@ -22,54 +23,10 @@ type AnnotationPlacement = {
   xRatio: number;
 };
 
-type WhalePlacement = {
-  amountUsd: number;
-  id: string;
-  outcome: "YES" | "NO";
-  pointIndex: number;
-  timestamp: string;
-  value: number;
-  wallet: string;
-};
-
 type OverlayPosition = {
   x: number;
   y: number;
 };
-
-const WHALE_DOT_COLOR = "#f5b500";
-
-const WHALE_PLACEHOLDERS: Array<Pick<WhalePlacement, "amountUsd" | "outcome" | "wallet">> = [
-  { amountUsd: 1_240_000, outcome: "YES", wallet: "0x9F2E…A14C" },
-  { amountUsd: 875_000, outcome: "YES", wallet: "0x4B81…73DD" }
-];
-
-function buildWhalePlacements(series: TimePoint[]): WhalePlacement[] {
-  if (series.length < 2) return [];
-  // Place placeholders at ~35% and ~78% of the series so they don't sit on top of the news annotations.
-  const positions = [0.35, 0.78];
-
-  return positions.map((fraction, index) => {
-    const seriesIndex = Math.min(series.length - 1, Math.max(0, Math.round(fraction * (series.length - 1))));
-    const point = series[seriesIndex];
-    const placeholder = WHALE_PLACEHOLDERS[index % WHALE_PLACEHOLDERS.length];
-    return {
-      id: `whale-${seriesIndex}-${index}`,
-      amountUsd: placeholder.amountUsd,
-      outcome: placeholder.outcome,
-      pointIndex: seriesIndex,
-      wallet: placeholder.wallet,
-      timestamp: point.timestamp,
-      value: point.value
-    };
-  });
-}
-
-function formatWhaleAmount(usd: number) {
-  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(2)}M`;
-  if (usd >= 1_000) return `$${(usd / 1_000).toFixed(0)}k`;
-  return `$${usd.toFixed(0)}`;
-}
 
 function pickIndices(length: number, desiredCount: number) {
   if (length <= 0) return [];
@@ -128,11 +85,14 @@ function buildAnnotations(series: TimePoint[], events: TimelineEvent[]): Annotat
   });
 }
 
-export function PolymarketHistoryChart({ events = [], series }: PolymarketHistoryChartProps) {
+export function PolymarketHistoryChart({
+  events = [],
+  series,
+  venueName = "Polymarket"
+}: PolymarketHistoryChartProps) {
   const { theme } = useTheme();
   const chartInstanceRef = useRef<any>(null);
   const [annotationPositions, setAnnotationPositions] = useState<Record<string, OverlayPosition>>({});
-  const [whalePositions, setWhalePositions] = useState<Record<string, OverlayPosition>>({});
 
   const sortedSeries = useMemo(
     () => [...series].sort((left, right) => left.timestamp.localeCompare(right.timestamp)),
@@ -189,7 +149,7 @@ export function PolymarketHistoryChart({ events = [], series }: PolymarketHistor
       },
       series: [
         {
-          name: "Polymarket Price",
+          name: `${venueName} Price`,
           type: "line",
           smooth: 0.22,
           symbol: "circle",
@@ -203,13 +163,15 @@ export function PolymarketHistoryChart({ events = [], series }: PolymarketHistor
     };
 
     return {
-      annotations: buildAnnotations(sortedSeries, events),
+      annotations:
+        events.length || venueName === "Polymarket"
+          ? buildAnnotations(sortedSeries, events)
+          : [],
       leaderColor,
       option,
-      textColor,
-      whales: buildWhalePlacements(sortedSeries)
+      textColor
     };
-  }, [events, sortedSeries, theme]);
+  }, [events, sortedSeries, theme, venueName]);
 
   useEffect(() => {
     const updateOverlayPositions = () => {
@@ -226,18 +188,7 @@ export function PolymarketHistoryChart({ events = [], series }: PolymarketHistor
         })
       );
 
-      const nextWhalePositions = Object.fromEntries(
-        chartModel.whales.map((whale) => {
-          const [x, y] = instance.convertToPixel(
-            { xAxisIndex: 0, yAxisIndex: 0 },
-            [whale.pointIndex, whale.value]
-          );
-          return [whale.id, { x, y }];
-        })
-      );
-
       setAnnotationPositions(nextAnnotationPositions);
-      setWhalePositions(nextWhalePositions);
     };
 
     const timeoutId = window.setTimeout(updateOverlayPositions, 0);
@@ -247,7 +198,7 @@ export function PolymarketHistoryChart({ events = [], series }: PolymarketHistor
       window.clearTimeout(timeoutId);
       window.removeEventListener("resize", updateOverlayPositions);
     };
-  }, [chartModel.annotations, chartModel.whales, chartModel.option]);
+  }, [chartModel.annotations, chartModel.option]);
 
   if (!sortedSeries.length) {
     return (
@@ -262,7 +213,10 @@ export function PolymarketHistoryChart({ events = [], series }: PolymarketHistor
   return (
     <div className="relative w-full">
       {/* Desktop: callout band sits above the chart so cards never collide with the price line */}
-      <div className="relative hidden w-full md:block" style={{ height: 132 }}>
+      <div
+        className="relative hidden w-full md:block"
+        style={{ height: annotationCount ? 132 : 0 }}
+      >
         {chartModel.annotations.map((annotation, index) => {
           const isFirst = index === 0;
           const isLast = index === annotationCount - 1;
@@ -313,18 +267,6 @@ export function PolymarketHistoryChart({ events = [], series }: PolymarketHistor
                 })
               )
             );
-
-            setWhalePositions(
-              Object.fromEntries(
-                chartModel.whales.map((whale) => {
-                  const [x, y] = instance.convertToPixel(
-                    { xAxisIndex: 0, yAxisIndex: 0 },
-                    [whale.pointIndex, whale.value]
-                  );
-                  return [whale.id, { x, y }];
-                })
-              )
-            );
           }}
           style={{ height: "100%", width: "100%" }}
         />
@@ -357,65 +299,7 @@ export function PolymarketHistoryChart({ events = [], series }: PolymarketHistor
             ) : null}
           </div>
         ))}
-
-        {/* Whale buy markers — yellow dots on the line */}
-        {chartModel.whales.map((whale) => (
-          whalePositions[whale.id] ? (
-            <div
-              key={`${whale.id}-marker`}
-              className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-[0_0_0_3px_rgba(245,181,0,0.18)]"
-              style={{
-                left: whalePositions[whale.id].x,
-                top: whalePositions[whale.id].y,
-                backgroundColor: WHALE_DOT_COLOR,
-                borderColor: WHALE_DOT_COLOR
-              }}
-              aria-label={`Whale buy ${formatWhaleAmount(whale.amountUsd)}`}
-            />
-          ) : null
-        ))}
       </div>
-
-      {/* Whale buy details — rendered below the chart on all breakpoints */}
-      {chartModel.whales.length > 0 && (
-        <div className="mt-6">
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: WHALE_DOT_COLOR }}
-            />
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-              Whale buys on Polymarket
-            </p>
-            <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
-              · placeholder
-            </span>
-          </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {chartModel.whales.map((whale) => (
-              <div
-                key={`${whale.id}-card`}
-                className="rounded-2xl border px-4 py-3"
-                style={{ borderColor: "rgba(245, 181, 0, 0.45)", backgroundColor: "rgba(245, 181, 0, 0.08)" }}
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <p className="text-sm font-semibold" style={{ color: chartModel.textColor }}>
-                    {formatWhaleAmount(whale.amountUsd)} {whale.outcome}
-                  </p>
-                  <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">
-                    {formatTimestamp(whale.timestamp, "MMM d, yyyy · HH:mm 'UTC'")}
-                  </p>
-                </div>
-                <p className="mt-1 text-xs leading-5 text-slate-600">
-                  Wallet {whale.wallet} swept the {whale.outcome} side; placeholder copy until live whale-flow feed is wired
-                  in.
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

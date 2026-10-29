@@ -5,15 +5,23 @@ import type {
   LiveReplay,
   MarketContext,
   MarketSnapshot,
+  MarketTradePrint,
   OrderbookState,
   OrderbookSummary,
   TimePoint,
   TradePrint
 } from "@/types/market";
+import type { RegionSignalsResponse } from "@/types/signals";
 import { useDataSourceStore } from "@/stores/dataSourceStore";
 import { withApiBase } from "@/services/api/base";
 import { polymarketConfig } from "./config";
-import { normalizeGammaEvent, normalizeGammaMarket, normalizeOrderbook, normalizePriceHistory } from "./normalizers";
+import {
+  normalizeGammaEvent,
+  normalizeGammaMarket,
+  normalizeMarketTrades,
+  normalizeOrderbook,
+  normalizePriceHistory
+} from "./normalizers";
 import {
   validateGammaEventPayload,
   validateGammaMarketPayload,
@@ -54,6 +62,58 @@ async function requestJson<T>(url: string): Promise<T> {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export async function fetchPolymarketEventsBySlugs(
+  slugs: string[]
+): Promise<MarketSnapshot[]> {
+  const uniqueSlugs = [...new Set(slugs)].sort().slice(0, 50);
+  if (!uniqueSlugs.length) return [];
+
+  const path = `/api/polymarket/events?slugs=${encodeURIComponent(
+    uniqueSlugs.join(",")
+  )}`;
+  const urls = [withApiBase(path), path].filter(
+    (url, index, all) => all.indexOf(url) === index
+  );
+
+  for (const url of urls) {
+    try {
+      const payload = await requestJson<unknown>(url);
+      const normalizedMarkets =
+        isRecord(payload) && Array.isArray(payload.markets)
+          ? payload.markets.filter(
+              (market): market is MarketSnapshot =>
+                isRecord(market) &&
+                typeof market.marketId === "string" &&
+                typeof market.slug === "string" &&
+                typeof market.title === "string" &&
+                typeof market.probability === "number" &&
+                typeof market.updatedAt === "string"
+            )
+          : [];
+      if (normalizedMarkets.length) return normalizedMarkets;
+
+      const events =
+        isRecord(payload) && Array.isArray(payload.events)
+          ? payload.events
+          : Array.isArray(payload)
+            ? payload
+            : [];
+      const markets = events
+        .map((event) => normalizeGammaEvent(event))
+        .filter((market): market is MarketSnapshot => market !== null);
+      if (markets.length) return markets;
+    } catch {
+      continue;
+    }
+  }
+
+  return [];
+}
+
 function pickFeaturedMarket(markets: unknown[]): MarketSnapshot | null {
   for (const market of markets) {
     const normalized = normalizeGammaMarket(market);
@@ -71,14 +131,25 @@ export async function fetchEventMarketBySlug(
     return null;
   }
 
-  const url = withApiBase(`/api/polymarket/featured-market?slug=${encodeURIComponent(slug)}`);
-  const payload = await requestJson<unknown>(url);
-  const payloadIssue = validateGammaEventPayload(payload);
-  if (payloadIssue) {
-    return null;
+  const path = `/api/polymarket/featured-market?slug=${encodeURIComponent(slug)}`;
+  const urls = [withApiBase(path), path].filter(
+    (url, index, all) => all.indexOf(url) === index
+  );
+
+  for (const url of urls) {
+    try {
+      const payload = await requestJson<unknown>(url);
+      const payloadIssue = validateGammaEventPayload(payload);
+      if (payloadIssue) continue;
+
+      const market = normalizeGammaEvent(payload, preferredOutcomeLabels);
+      if (market) return market;
+    } catch {
+      continue;
+    }
   }
 
-  return normalizeGammaEvent(payload, preferredOutcomeLabels);
+  return null;
 }
 
 export async function fetchFeaturedMarketLive(): Promise<MarketSnapshot | null> {
@@ -177,8 +248,8 @@ export async function fetchOrderbookLive(tokenId: string): Promise<OrderbookStat
   }
 }
 
-export async function fetchTradesLive(tokenId: string): Promise<TradePrint[]> {
-  const tradesUrl = withApiBase(`/api/polymarket/trades?tokenId=${encodeURIComponent(tokenId)}`);
+export async function fetchTradesLive(conditionId: string): Promise<TradePrint[]> {
+  const tradesUrl = withApiBase(`/api/polymarket/trades?conditionId=${encodeURIComponent(conditionId)}`);
   try {
     const payload = await requestJson<unknown>(tradesUrl);
     const payloadIssue = validateTradesPayload(payload);
@@ -186,7 +257,7 @@ export async function fetchTradesLive(tokenId: string): Promise<TradePrint[]> {
       recordFallback("trades", payloadIssue.stage, payloadIssue.message);
       return [];
     }
-    const normalized = normalizeOrderbook({ trades: Array.isArray(payload) ? payload : [] }, tokenId);
+    const normalized = normalizeOrderbook({ trades: Array.isArray(payload) ? payload : [] }, conditionId);
     const trades = normalized?.trades ?? [];
     if (trades.length) {
       recordLive("trades");
@@ -200,8 +271,40 @@ export async function fetchTradesLive(tokenId: string): Promise<TradePrint[]> {
   }
 }
 
-export async function fetchOrderbookSummaryLive(tokenId: string): Promise<OrderbookSummary | null> {
-  const summaryUrl = withApiBase(`/api/polymarket/orderbook-summary?tokenId=${encodeURIComponent(tokenId)}`);
+export async function fetchRecentMarketTrades(
+  limit = 60
+): Promise<MarketTradePrint[]> {
+  const safeLimit = Math.min(100, Math.max(1, Math.floor(limit)));
+  const path = `/api/polymarket/trades?limit=${safeLimit}`;
+  const urls = [withApiBase(path), path].filter(
+    (url, index, all) => all.indexOf(url) === index
+  );
+
+  for (const url of urls) {
+    try {
+      const payload = await requestJson<unknown>(url);
+      const payloadIssue = validateTradesPayload(payload);
+      if (payloadIssue) continue;
+
+      const trades = normalizeMarketTrades(payload);
+      if (trades.length) return trades;
+    } catch {
+      continue;
+    }
+  }
+
+  return [];
+}
+
+export async function fetchOrderbookSummaryLive(
+  tokenId: string,
+  conditionId?: string
+): Promise<OrderbookSummary | null> {
+  const summaryUrl = withApiBase(
+    `/api/polymarket/orderbook-summary?tokenId=${encodeURIComponent(tokenId)}${
+      conditionId ? `&conditionId=${encodeURIComponent(conditionId)}` : ""
+    }`
+  );
   try {
     const payload = await requestJson<OrderbookSummary>(summaryUrl);
     if (
@@ -357,6 +460,49 @@ export async function fetchLiveDegradation(): Promise<LiveDegradation | null> {
     return payload;
   } catch {
     recordFallback("live-degradation", "reachability", "Live degradation request failed");
+    return null;
+  }
+}
+
+export async function fetchRegionSignals(
+  countryCode: string,
+  activeSlug?: string
+): Promise<RegionSignalsResponse | null> {
+  const params = new URLSearchParams({ countryCode });
+  if (activeSlug) {
+    params.set("activeSlug", activeSlug);
+  }
+  const url = withApiBase(`/api/signals/regions?${params.toString()}`);
+
+  try {
+    const payload = await requestJson<RegionSignalsResponse>(url);
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      payload.countryCode !== countryCode ||
+      !Array.isArray(payload.signals) ||
+      payload.signals.some(
+        (signal) =>
+          typeof signal.regionCode !== "string" ||
+          typeof signal.marketSlug !== "string" ||
+          typeof signal.score !== "number" ||
+          (signal.source !== "live" && signal.source !== "fixture")
+      )
+    ) {
+      recordFallback("region-signals", "payload", "Region signal batch was malformed");
+      return null;
+    }
+
+    if (payload.source === "live") {
+      recordLive("region-signals");
+    } else if (payload.source === "mixed") {
+      recordFallback("region-signals", "payload", "Some regions are using signal fixtures");
+    } else {
+      recordFallback("region-signals", "payload", "Region signal batch is using fixtures");
+    }
+    return payload;
+  } catch {
+    recordFallback("region-signals", "reachability", "Region signal batch request failed");
     return null;
   }
 }

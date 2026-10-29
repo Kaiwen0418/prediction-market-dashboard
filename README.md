@@ -1,6 +1,6 @@
 # Prediction Market Intelligence Dashboard
 
-Prediction-market research product with a Vercel-hosted Next.js frontend and a Railway-hosted FastAPI + NumPy backend. The app combines live Polymarket data, cached research datasets, quantitative analytics, and editorial visualization.
+Prediction-market research product with a Vercel-hosted Next.js frontend and a FastAPI + NumPy backend on the local development machine. The app combines live Polymarket data, cached research datasets, quantitative analytics, and editorial visualization.
 
 ## Product Structure
 
@@ -50,18 +50,17 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs).
 - Framework preset: `Next.js`
 - Install command: `pnpm install --frozen-lockfile`
 - Build command: `pnpm build`
-- Node version: `22.x`
-- Environment variable: `NEXT_PUBLIC_API_BASE_URL=https://your-railway-app.up.railway.app`
+- Node version: `24.x`
+- Environment variable: `NEXT_PUBLIC_API_BASE_URL=https://predict-test.project-echo.xyz`
 
-### Backend on Railway
+### Backend on the development machine
 
-- Root directory: `backend`
-- Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Python version: `3.11+`
-- Recommended variables:
-  - `APP_ENV=production`
-  - `FEATURED_MARKET_SLUG=california-governor-election-2026`
-  - `ALLOW_ORIGINS=["https://your-vercel-project.vercel.app"]`
+- Host: `frodo@192.168.1.131`
+- Deploy: `./deploy/update-local.sh`
+- Public API: `https://predict-test.project-echo.xyz`
+- Runtime: Docker Compose, Python 3.12, PostgreSQL 17, persistent named Cloudflare Tunnel
+- Railway deployment is offline and disconnected from its GitHub source.
+- See [operations](deploy/README.md) and [migration verification](docs/local-migration-2026-10-28.md).
 
 The frontend falls back to its local Next.js route handlers if `NEXT_PUBLIC_API_BASE_URL` is not set.
 
@@ -92,3 +91,11 @@ pnpm generate:state-support -- /tmp/presidential_general_averages_2024-09-12_unc
 - The frontend still supports its original Next route handlers for local or fallback use.
 - The FastAPI backend currently owns the live Polymarket proxy layer and NumPy analytics endpoints.
 - This split is intended to showcase both frontend systems thinking and backend/data-engineering ability.
+
+
+### Local test migration and independent surveillance
+
+The unmerged surveillance branch includes a local Docker Compose deployment for
+`frodo@192.168.1.131`. See [deployment instructions](deploy/README.md) and the
+[measured capacity assessment](docs/surveillance-capacity-2026-10-28.md).
+The Vercel frontend now uses the fixed public Tunnel; PR #15 remains draft and unmerged.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Prediction Market fixed HTTPS API tunnel
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --config %h/prediction-market-dashboard/deploy/tunnel.yml run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,28 @@
+{
+  "base": "http://127.0.0.1:8000",
+  "workload": "Warm read-only API probes alongside live collectors; not a sustained load test",
+  "results": [
+    {
+      "path": "/health",
+      "requests": 50,
+      "concurrency": 10,
+      "seconds": 0.057,
+      "status_counts": {
+        "200": 50
+      },
+      "p50_ms": 7.83,
+      "p95_ms": 23.05
+    },
+    {
+      "path": "/api/polymarket/market-context",
+      "requests": 50,
+      "concurrency": 10,
+      "seconds": 0.16,
+      "status_counts": {
+        "200": 50
+      },
+      "p50_ms": 29.88,
+      "p95_ms": 32.7
+    }
+  ]
+}

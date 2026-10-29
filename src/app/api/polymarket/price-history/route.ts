@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { polymarketConfig } from "@/services/polymarket/config";
 import { proxyJson, validateProxyBaseUrls } from "../_lib/proxy";
 
-export const revalidate = 60;
+export const revalidate = 300;
 
 export async function GET(request: NextRequest) {
   const baseUrlError = validateProxyBaseUrls();
@@ -17,7 +17,10 @@ export async function GET(request: NextRequest) {
   const url = `${polymarketConfig.clobBaseUrl}/prices-history?interval=all&market=${encodeURIComponent(market)}&fidelity=720`;
   try {
     if (!debug) {
-      return await proxyJson(url);
+      return await proxyJson(url, {
+        revalidateSeconds: 300,
+        staleIfErrorSeconds: 3600
+      });
     }
 
     const response = await fetch(url, {

@@ -1,4 +1,12 @@
-import type { MarketSnapshot, OrderbookLevel, OrderbookState, TimelineEvent, TimePoint, TradePrint } from "@/types/market";
+import type {
+  MarketSnapshot,
+  MarketTradePrint,
+  OrderbookLevel,
+  OrderbookState,
+  TimelineEvent,
+  TimePoint,
+  TradePrint
+} from "@/types/market";
 import type { NormalizedBookEvent } from "@/types/ws";
 
 type UnknownRecord = Record<string, unknown>;
@@ -18,6 +26,35 @@ function asNumber(value: unknown, fallback = 0): number {
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function asTimestamp(value: unknown): string | undefined {
+  const rawValue = asString(value);
+  if (!rawValue) return undefined;
+
+  const timestamp = new Date(rawValue);
+  return Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : undefined;
+}
+
+function asHttpUrl(value: unknown): string | undefined {
+  const rawValue = asString(value);
+  if (!rawValue) return undefined;
+
+  try {
+    const url = new URL(rawValue);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function asWalletAddress(value: unknown): string | undefined {
+  const address = asString(value);
+  return /^0x[a-fA-F0-9]{40}$/.test(address) ? address.toLowerCase() : undefined;
 }
 
 function parseJsonArray(value: unknown): unknown[] {
@@ -56,6 +93,20 @@ function parseTokenMetadata(payload: UnknownRecord) {
   };
 }
 
+function normalizeMarketStatus(
+  market: UnknownRecord,
+  event?: UnknownRecord
+): MarketSnapshot["status"] {
+  const closed = asBoolean(market.closed) ?? asBoolean(event?.closed);
+  const active = asBoolean(market.active) ?? asBoolean(event?.active);
+  const acceptingOrders = asBoolean(market.acceptingOrders);
+
+  if (closed === true) return "closed";
+  if (active === false || acceptingOrders === false) return "inactive";
+  if (active === true && closed === false) return "open";
+  return "unknown";
+}
+
 function normalizeEventMarketCandidate(event: UnknownRecord, market: UnknownRecord): MarketSnapshot | null {
   const { tokenId, outcomeLabel, probability } = parseTokenMetadata(market);
   if (!tokenId) return null;
@@ -67,6 +118,7 @@ function normalizeEventMarketCandidate(event: UnknownRecord, market: UnknownReco
 
   return {
     marketId,
+    conditionId: asString(market.conditionId) || undefined,
     eventId: asString(event.id) || undefined,
     tokenId,
     slug: asString(event.slug, marketId),
@@ -78,7 +130,11 @@ function normalizeEventMarketCandidate(event: UnknownRecord, market: UnknownReco
     openInterest: asNumber(market.openInterest, asNumber(event.openInterest)),
     liquidity: asNumber(market.liquidity, asNumber(event.liquidity)),
     image: asString(event.image) || undefined,
-    description: asString(event.description) || undefined,
+    description: asString(market.description, asString(event.description)) || undefined,
+    endDate: asTimestamp(market.endDate ?? market.endDateIso ?? event.endDate ?? event.endDateIso),
+    resolutionSource: asHttpUrl(market.resolutionSource ?? event.resolutionSource),
+    venue: "Polymarket",
+    status: normalizeMarketStatus(market, event),
     outcomeLabel: normalizedOutcomeLabel ?? contractLabel,
     contractLabel,
     updatedAt: new Date().toISOString()
@@ -95,6 +151,7 @@ export function normalizeGammaMarket(payload: unknown): MarketSnapshot | null {
 
   return {
     marketId,
+    conditionId: asString(payload.conditionId) || undefined,
     eventId: asString(payload.eventId) || undefined,
     tokenId,
     slug,
@@ -107,6 +164,10 @@ export function normalizeGammaMarket(payload: unknown): MarketSnapshot | null {
     liquidity: asNumber(payload.liquidity),
     image: asString(payload.image) || undefined,
     description: asString(payload.description) || undefined,
+    endDate: asTimestamp(payload.endDate ?? payload.endDateIso),
+    resolutionSource: asHttpUrl(payload.resolutionSource),
+    venue: "Polymarket",
+    status: normalizeMarketStatus(payload),
     outcomeLabel,
     updatedAt: new Date().toISOString()
   };
@@ -177,6 +238,18 @@ function normalizeLevels(input: unknown): OrderbookLevel[] {
     .filter((row) => row.price > 0 && row.size > 0);
 }
 
+function normalizeTradeTimestamp(value: unknown) {
+  if (typeof value === "number") {
+    return new Date(value * 1000).toISOString();
+  }
+
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    return new Date(Number(value) * 1000).toISOString();
+  }
+
+  return asString(value, new Date().toISOString());
+}
+
 function normalizeTrades(input: unknown): TradePrint[] {
   if (!Array.isArray(input)) return [];
 
@@ -189,13 +262,48 @@ function normalizeTrades(input: unknown): TradePrint[] {
         side,
         price: asNumber(trade.price),
         size: asNumber(trade.size),
-        timestamp:
-          typeof trade.timestamp === "number"
-            ? new Date(trade.timestamp * 1000).toISOString()
-            : asString(trade.timestamp, new Date().toISOString())
+        timestamp: normalizeTradeTimestamp(trade.timestamp),
+        walletAddress: asWalletAddress(trade.proxyWallet)
       };
     })
     .filter((trade) => trade.price > 0 && trade.size > 0);
+}
+
+export function normalizeMarketTrades(input: unknown): MarketTradePrint[] {
+  if (!Array.isArray(input)) return [];
+
+  return input
+    .filter(isRecord)
+    .map((trade, index): MarketTradePrint => ({
+      id: `${asString(trade.transactionHash, "trade")}-${asString(
+        trade.asset,
+        String(index)
+      )}`,
+      side:
+        String(trade.side).toLowerCase() === "sell" ? "sell" : "buy",
+      price: asNumber(trade.price),
+      size: asNumber(trade.size),
+      timestamp: normalizeTradeTimestamp(trade.timestamp),
+      walletAddress: asWalletAddress(trade.proxyWallet),
+      conditionId: asString(trade.conditionId),
+      marketSlug: asString(trade.slug),
+      eventSlug: asString(trade.eventSlug) || undefined,
+      title: asString(trade.title),
+      outcome: asString(trade.outcome) || undefined
+    }))
+    .filter(
+      (trade) =>
+        trade.price > 0 &&
+        trade.size > 0 &&
+        Boolean(trade.conditionId) &&
+        Boolean(trade.marketSlug) &&
+        Boolean(trade.title)
+    )
+    .sort(
+      (left, right) =>
+        new Date(right.timestamp).getTime() -
+        new Date(left.timestamp).getTime()
+    );
 }
 
 export function normalizeOrderbook(payload: unknown, tokenId?: string): OrderbookState | null {

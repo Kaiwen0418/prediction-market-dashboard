@@ -11,21 +11,18 @@ import { ShockWindowBarChart } from "@/components/charts/ShockWindowBarChart";
 import { StateMetricSmallMultiples } from "@/components/charts/StateMetricSmallMultiples";
 import { StateSignalMatrix } from "@/components/charts/StateSignalMatrix";
 import { LoadingState } from "@/components/layout/LoadingState";
+import { OperationalNotice } from "@/components/layout/OperationalNotice";
 import { ProductDemoShell } from "@/components/layout/ProductDemoShell";
-import { useSourceDiagnostics } from "@/hooks/useSourceDiagnostics";
 import { getShockWindows } from "@/services/analytics/api";
-import { getLiveHistoryCases, getLiveHistoryOverview } from "@/services/history/liveHistory";
+import {
+  getLiveHistoryCases,
+  getLiveHistoryOverview,
+  type LiveHistoryCase
+} from "@/services/history/liveHistory";
 import supportDataset from "@/../public/data/state-party-support-2024.json";
 import { researchCases, researchDataSources } from "@/services/history/researchStatic";
 
 type Party = "Democrat" | "Republican";
-
-function sourceTone(state?: string) {
-  if (state === "live") return "border-emerald-200 bg-emerald-50 text-emerald-900";
-  if (state === "fallback") return "border-amber-200 bg-amber-50 text-amber-900";
-  if (state === "failed") return "border-rose-200 bg-rose-50 text-rose-900";
-  return "border-slate-200 bg-slate-50 text-slate-800";
-}
 
 function buildPollSeries(state: string, party: Party) {
   const stateData = supportDataset.states.find((entry) => entry.state === state);
@@ -82,7 +79,6 @@ export function HistoryPageView() {
     queryKey: ["history-overview", party],
     queryFn: () => getLiveHistoryOverview(party)
   });
-  const sourceDiagnostics = useSourceDiagnostics();
 
   const availableStates = ["Arizona", "Georgia", "Michigan", "Pennsylvania", "Wisconsin"];
   const [activeState, setActiveState] = useState(availableStates[0]);
@@ -90,10 +86,12 @@ export function HistoryPageView() {
   const researchCase = researchCases.find((item) => item.state === activeState) ?? researchCases[0];
   const pollSeries = buildPollSeries(activeState, party);
   const fallbackCoverage = buildCoverage(pollSeries, researchCase.marketSeries);
-  const activeCase = liveCase
+  const activeCase: LiveHistoryCase = liveCase
     ? { ...liveCase, pollSeries }
     : {
         ...researchCase,
+        eventSlug: `${activeState.toLowerCase()}-presidential-election-winner`,
+        party,
         analyticsSource: "local" as const,
         researchSource: "local" as const,
         divergence: {
@@ -123,15 +121,16 @@ export function HistoryPageView() {
         },
         coverage: fallbackCoverage,
         narrative: {
-          overview: `${activeState} ${party.toLowerCase()} support is displayed from a local fallback bundle because the live research summary was unavailable.`,
-          methodology: "This fallback route pairs cleaned public polling support with a static research-style market series and local analytics."
+          overview: `${activeState} ${party.toLowerCase()} support is compared with the latest available prediction-market history.`,
+          methodology: "The comparison pairs cleaned public polling averages with the latest available market history."
         },
         researchHighlights: {
-          shockLabel: "Shock window analysis is unavailable in the static fallback bundle.",
+          shockLabel: "Shock-window analysis is currently unavailable.",
           leadLagLabel: researchCase.leadLag.interpretation,
-          divergenceLabel: "Divergence summary is only calculated when the live analytics pipeline is available."
+          divergenceLabel: "Divergence analysis is currently unavailable."
         },
-        summary: `${party} polling shown from cleaned public dataset; market series is fallback research data.`,
+        summary: `${party} polling and prediction-market history for ${activeState}.`,
+        sourceUrls: []
       };
   const pollingSources = Array.from(new Map(activeCase.pollSeries.map((point) => [point.source, point])).values());
   const usingLiveCases = Boolean(liveCase);
@@ -172,22 +171,15 @@ export function HistoryPageView() {
 
   return (
     <ProductDemoShell
-      barLeft="Prediction Market Intelligence"
-      barCenter="Research + Historical Comparison"
-      barRight="Cached public polling and PM history"
-      title={
-        <>
-          Research
-          <br />
-          Signal
-        </>
-      }
+      brand="Prediction Market Intelligence"
+      context="Research · Polling and market history"
+      title="Research"
       showHero={false}
     >
       <div className="mx-auto flex max-w-7xl flex-col gap-8">
         <section>
           <p className="metric-label">Historical Analysis</p>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-900">Research-style market vs polling comparison</h1>
+          <h2 className="mt-2 text-3xl font-semibold text-slate-900">Research-style market vs polling comparison</h2>
           <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
             {activeCase.narrative?.overview}
           </p>
@@ -217,11 +209,15 @@ export function HistoryPageView() {
               Polling aggregate reference
             </a>
           </div>
-          <p className="mt-4 text-sm text-slate-500">
-            {usingLiveCases
-              ? `Live source mode: public cleaned 538 dataset + Polymarket historical prices (${party})`
-              : "Fallback mode: research-inspired static series"}
-          </p>
+          {!usingLiveCases ? (
+            <div className="mt-5 max-w-2xl">
+              <OperationalNotice
+                tone="warning"
+                title="Showing the latest available research data"
+                detail="The newest comparison is temporarily unavailable. Dates and coverage are shown below."
+              />
+            </div>
+          ) : null}
           {activeCase.coverage ? (
             <p className="mt-2 text-sm text-slate-500">
               Coverage: polls {activeCase.coverage.pollStart ?? "unknown"} to {activeCase.coverage.pollEnd ?? "unknown"} ({activeCase.coverage.pollPoints} points)
@@ -232,6 +228,111 @@ export function HistoryPageView() {
             </p>
           ) : null}
         </section>
+
+        {activeCase.relatedMarketDivergence || activeCase.catalysts?.length ? (
+          <section className="border-t border-[var(--demo-card-divider)] pt-8">
+            <p className="metric-label">Political Catalyst Intelligence</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">
+              Related markets and source-linked events
+            </h2>
+
+            {activeCase.relatedMarketDivergence ? (
+              <div className="mt-6 grid gap-6 border-y border-[var(--demo-card-divider)] py-5 lg:grid-cols-[1fr_1fr_1.2fr]">
+                {[activeCase.relatedMarketDivergence.primary, activeCase.relatedMarketDivergence.related].map(
+                  (comparison) => (
+                    <div key={comparison.label}>
+                      <p className="metric-label">{comparison.label} outcome</p>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-900">
+                        {(comparison.probability * 100).toFixed(1)}%
+                      </p>
+                      <a
+                        href={comparison.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-2 block text-xs text-slate-500 hover:text-slate-900"
+                      >
+                        Observed {comparison.observedAt.slice(0, 10)} ↗
+                      </a>
+                    </div>
+                  )
+                )}
+                <div>
+                  <p className="metric-label">Consistency check</p>
+                  <p className="mt-2 text-lg font-semibold text-slate-900">
+                    {activeCase.relatedMarketDivergence.rawGapPoints.toFixed(2)} pts raw gap
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {activeCase.relatedMarketDivergence.feeBpsPerLeg.toFixed(0)} bps per leg ·{" "}
+                    {activeCase.relatedMarketDivergence.actionableGapPoints.toFixed(2)} pts after fees · liquidity{" "}
+                    {activeCase.relatedMarketDivergence.liquidityUsd === null ||
+                    activeCase.relatedMarketDivergence.liquidityUsd === undefined
+                      ? "unverified"
+                      : `$${activeCase.relatedMarketDivergence.liquidityUsd.toLocaleString()}`}
+                  </p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    {activeCase.relatedMarketDivergence.explanation}
+                  </p>
+                  {activeCase.electionModelComparison ? (
+                    <div className="mt-3 border-t border-[var(--demo-card-divider)] pt-3">
+                      <p className="text-sm font-semibold text-slate-900">
+                        Model {(activeCase.electionModelComparison.modelProbability * 100).toFixed(1)}% · market-model gap{" "}
+                        {activeCase.electionModelComparison.divergencePoints >= 0 ? "+" : ""}
+                        {activeCase.electionModelComparison.divergencePoints.toFixed(2)} pts
+                      </p>
+                      <a
+                        href={activeCase.electionModelComparison.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 block text-xs text-slate-500 hover:text-slate-900"
+                      >
+                        {activeCase.electionModelComparison.modelName} · poll{" "}
+                        {activeCase.electionModelComparison.pollObservedAt.slice(0, 10)} · market{" "}
+                        {activeCase.electionModelComparison.marketObservedAt.slice(0, 10)} ↗
+                      </a>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                        {activeCase.electionModelComparison.methodology}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {activeCase.catalysts?.length ? (
+              <div className="mt-6 divide-y divide-[var(--demo-card-divider)]">
+                {activeCase.catalysts.map((catalyst) => (
+                  <div
+                    key={catalyst.id}
+                    className="grid gap-2 py-4 md:grid-cols-[150px_minmax(0,1fr)_120px]"
+                  >
+                    <div>
+                      <p className="text-xs font-medium uppercase text-slate-500">{catalyst.eventType}</p>
+                      <p className="mt-1 text-xs text-slate-400">{catalyst.occurredAt.slice(0, 10)}</p>
+                    </div>
+                    <div>
+                      <a
+                        href={catalyst.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-slate-900 hover:underline"
+                      >
+                        {catalyst.headline} ↗
+                      </a>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">{catalyst.summary}</p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {catalyst.sourceName} · matched {catalyst.matchedMarketTimestamp.slice(0, 10)}
+                      </p>
+                    </div>
+                    <p className="text-left text-lg font-semibold tabular-nums text-slate-900 md:text-right">
+                      {catalyst.marketMove >= 0 ? "+" : ""}
+                      {catalyst.marketMove.toFixed(2)} pts
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <section className="border-t border-[var(--demo-card-divider)] pt-8">
           <div className="flex flex-wrap items-center gap-3">
@@ -266,36 +367,6 @@ export function HistoryPageView() {
               </button>
             ))}
           </div>
-          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            {["Arizona", "Georgia", "Michigan", "Pennsylvania", "Wisconsin"].map((state) => {
-              const diagnostics = sourceDiagnostics[`history:${state}:${party}`];
-              const backendDiagnostics = sourceDiagnostics[`history-backend:${state}:${party}`];
-              const checkedAt = diagnostics?.checkedAt;
-
-              return (
-                <div
-                  key={state}
-                  className={`rounded-2xl border px-4 py-3 text-sm ${sourceTone(diagnostics?.state)}`}
-                >
-                  <p className="metric-label">{state}</p>
-                  <p className="mt-1 font-medium capitalize">
-                    {diagnostics?.state ?? "pending"} · {diagnostics?.mode ?? "mock"}
-                  </p>
-                  <p className="mt-1 text-xs opacity-80 capitalize">
-                    backend {backendDiagnostics?.state ?? "pending"}
-                  </p>
-                  <p className="mt-1 text-xs opacity-80">
-                    {checkedAt
-                      ? `Checked ${new Date(checkedAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric"
-                        })}`
-                      : "Not checked yet"}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
         </section>
 
         <section className="border-t border-[var(--demo-card-divider)] pt-8">
@@ -304,9 +375,6 @@ export function HistoryPageView() {
             <h2 className="mt-2 text-2xl font-semibold text-slate-900">Small multiples across battleground states</h2>
             <p className="mt-3 max-w-4xl text-sm leading-7 text-slate-500">
               This panel compresses the current parameter state across all tracked states so the page reads like a research surface rather than a single-case report.
-            </p>
-            <p className="mt-3 inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-slate-600">
-              Cross-state source: {overviewQuery.data ? "FastAPI overview route" : "frontend aggregated state summaries"}
             </p>
             <div className="mt-6">
               <StateMetricSmallMultiples data={comparisonCases} />
@@ -337,7 +405,7 @@ export function HistoryPageView() {
                 <div>
                   <p className="metric-label">Rolling Correlation Path</p>
                   <p className="mt-2 text-sm text-slate-500">
-                    FastAPI computes a trailing {activeCase.rollingCorrelation.windowSize}-day alignment score after date-matching the market and polling series.
+                    Trailing {activeCase.rollingCorrelation.windowSize}-day alignment after matching market and polling observations by date.
                   </p>
                 </div>
                 <p className="text-sm font-medium text-slate-700">{activeCase.rollingCorrelation.coefficient}</p>
@@ -421,16 +489,13 @@ export function HistoryPageView() {
           </div>
           <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
             <div className="rounded-[28px] border border-slate-200 bg-slate-50/70 p-5">
-              <div className="flex items-end justify-between gap-4">
+              <div>
                 <div>
                   <p className="metric-label">Shock Windows</p>
                   <p className="mt-2 text-sm text-slate-500">
                     Largest {shockWindowsQuery.data?.summary.topK ?? 3} trailing {shockWindowsQuery.data?.summary.windowSize ?? 7}-day moves in the market path, ranked by absolute repricing and local volatility.
                   </p>
                 </div>
-                <p className="text-sm font-medium text-slate-700">
-                  {shockWindowsQuery.data?.source === "api" ? "FastAPI + NumPy" : "local fallback"}
-                </p>
               </div>
               <div className="mt-4">
                 <ShockWindowBarChart windows={shockWindowsQuery.data?.summary.windows ?? []} />
@@ -503,15 +568,9 @@ export function HistoryPageView() {
           <p className="mt-4 text-sm leading-7 text-slate-500">
             {activeCase.narrative?.methodology}
           </p>
-          <p className="mt-3 inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-slate-600">
-            Analytics engine: {activeCase.analyticsSource === "api" ? "FastAPI + NumPy" : "local TypeScript fallback"}
-          </p>
-          <p className="mt-3 inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-slate-600">
-            Research bundle: {activeCase.researchSource === "api" ? "FastAPI state summary route" : "local frontend assembly"}
-          </p>
           {activeCase.provenance?.pollDatasetGeneratedAt || activeCase.provenance?.marketDatasetGeneratedAt ? (
             <p className="mt-3 text-xs text-slate-500">
-              Dataset freshness: polls {activeCase.provenance?.pollDatasetGeneratedAt ?? "unknown"} · market {activeCase.provenance?.marketDatasetGeneratedAt ?? "unknown"}
+              Data updated: polls {activeCase.provenance?.pollDatasetGeneratedAt ?? "unavailable"} · market {activeCase.provenance?.marketDatasetGeneratedAt ?? "unavailable"}
             </p>
           ) : null}
           <div className="mt-6">

@@ -2,12 +2,21 @@ import { NextResponse } from "next/server";
 import { polymarketConfig } from "@/services/polymarket/config";
 import { validateBaseUrl, validateSlug } from "@/services/polymarket/preflight";
 
-export async function proxyJson(url: string) {
+type ProxyJsonOptions = {
+  revalidateSeconds?: number;
+  staleIfErrorSeconds?: number;
+};
+
+export async function proxyJson(url: string, options: ProxyJsonOptions = {}) {
+  const revalidateSeconds = options.revalidateSeconds ?? 0;
+  const staleIfErrorSeconds = options.staleIfErrorSeconds ?? 0;
   const response = await fetch(url, {
     headers: {
       Accept: "application/json"
     },
-    cache: "no-store"
+    ...(revalidateSeconds > 0
+      ? { next: { revalidate: revalidateSeconds } }
+      : { cache: "no-store" as const })
   });
 
   const text = await response.text();
@@ -16,7 +25,10 @@ export async function proxyJson(url: string) {
     status: response.status,
     headers: {
       "Content-Type": response.headers.get("content-type") ?? "application/json",
-      "Cache-Control": "no-store"
+      "Cache-Control":
+        revalidateSeconds > 0
+          ? `public, s-maxage=${revalidateSeconds}, stale-while-revalidate=${staleIfErrorSeconds}, stale-if-error=${staleIfErrorSeconds}`
+          : "no-store"
     }
   });
 }
@@ -30,6 +42,11 @@ export function validateProxyBaseUrls() {
   const clobUrlIssue = validateBaseUrl(polymarketConfig.clobBaseUrl, "CLOB base URL");
   if (clobUrlIssue) {
     return NextResponse.json({ error: clobUrlIssue.message }, { status: 500 });
+  }
+
+  const dataUrlIssue = validateBaseUrl(polymarketConfig.dataApiBaseUrl, "Data API base URL");
+  if (dataUrlIssue) {
+    return NextResponse.json({ error: dataUrlIssue.message }, { status: 500 });
   }
 
   return null;

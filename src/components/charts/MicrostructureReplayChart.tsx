@@ -36,7 +36,7 @@ export function MicrostructureReplayChart({ samples }: MicrostructureReplayChart
   if (!samples.length) {
     return (
       <div className="flex h-[160px] items-center justify-center border-y border-[var(--demo-card-divider)] px-4 text-center text-sm text-slate-500">
-        Replay metrics are warming up. No sampled microstructure window is available yet.
+        Recent market activity is not available yet. This view will update automatically.
       </div>
     );
   }
@@ -154,7 +154,7 @@ export function MicrostructureReplayChart({ samples }: MicrostructureReplayChart
       />
       <ReplayPanel
         title="Realized Volatility"
-        description="Short-window log-return dispersion computed by the NumPy analytics service."
+        description="Short-window price dispersion across recent market observations."
         option={volatilityOption}
       />
     </div>

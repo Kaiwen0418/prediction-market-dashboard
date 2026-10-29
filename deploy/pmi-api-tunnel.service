@@ -1,0 +1,12 @@
+[Unit]
+Description=Prediction Market test API HTTPS tunnel
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --url http://127.0.0.1:18000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +9,7 @@ class MarketProxyResponse(BaseModel):
 
 class FeaturedMarketResponse(BaseModel):
     market_id: str = Field(alias="marketId")
+    condition_id: str | None = Field(default=None, alias="conditionId")
     event_id: str | None = Field(default=None, alias="eventId")
     token_id: str | None = Field(default=None, alias="tokenId")
     slug: str
@@ -44,6 +45,9 @@ class TradePrint(BaseModel):
     price: float
     size: float
     timestamp: str
+    wallet_address: str | None = Field(default=None, alias="walletAddress")
+
+    model_config = {"populate_by_name": True}
 
 
 class OrderbookSnapshot(BaseModel):
@@ -79,6 +83,72 @@ class TradePressureSummary(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class LargeTradeResponse(BaseModel):
+    trade_id: str = Field(alias="tradeId")
+    side: Literal["buy", "sell"]
+    price: float
+    size: float
+    timestamp: str
+    notional_usd: float = Field(alias="notionalUsd")
+    historical_size_multiple: float = Field(alias="historicalSizeMultiple")
+    executable_depth_share: float = Field(alias="executableDepthShare")
+    wallet_address: str | None = Field(default=None, alias="walletAddress")
+
+    model_config = {"populate_by_name": True}
+
+
+class WhaleActivityResponse(BaseModel):
+    status: Literal["insufficient-data", "clear", "detected"]
+    sample_size: int = Field(alias="sampleSize")
+    median_trade_size: float = Field(alias="medianTradeSize")
+    historical_multiple_threshold: float = Field(alias="historicalMultipleThreshold")
+    depth_share_threshold: float = Field(alias="depthShareThreshold")
+    minimum_sample_size: int = Field(alias="minimumSampleSize")
+    attribution_available: bool = Field(default=False, alias="attributionAvailable")
+    attributed_trade_count: int = Field(default=0, alias="attributedTradeCount")
+    unique_wallet_count: int = Field(default=0, alias="uniqueWalletCount")
+    wallet_sample_minimum: int = Field(default=10, alias="walletSampleMinimum")
+    wallet_concentration_status: Literal["unavailable", "insufficient-data", "available"] = Field(
+        default="unavailable",
+        alias="walletConcentrationStatus",
+    )
+    wallet_concentration_score: float | None = Field(default=None, alias="walletConcentrationScore")
+    top_wallet_volume_share: float | None = Field(default=None, alias="topWalletVolumeShare")
+    wallet_reputation_status: Literal["unavailable", "insufficient-history", "available"] = Field(
+        default="unavailable",
+        alias="walletReputationStatus",
+    )
+    wallet_reputation_score: float | None = Field(default=None, alias="walletReputationScore")
+    wallet_resolved_market_count: int = Field(default=0, alias="walletResolvedMarketCount")
+    wallet_resolved_market_minimum: int = Field(default=5, alias="walletResolvedMarketMinimum")
+    large_trades: list[LargeTradeResponse] = Field(default_factory=list, alias="largeTrades")
+
+    model_config = {"populate_by_name": True}
+
+
+def default_whale_activity() -> WhaleActivityResponse:
+    return WhaleActivityResponse(
+        status="insufficient-data",
+        sampleSize=0,
+        medianTradeSize=0,
+        historicalMultipleThreshold=3.0,
+        depthShareThreshold=0.05,
+        minimumSampleSize=5,
+        attributionAvailable=False,
+        attributedTradeCount=0,
+        uniqueWalletCount=0,
+        walletSampleMinimum=10,
+        walletConcentrationStatus="unavailable",
+        walletConcentrationScore=None,
+        topWalletVolumeShare=None,
+        walletReputationStatus="unavailable",
+        walletReputationScore=None,
+        walletResolvedMarketCount=0,
+        walletResolvedMarketMinimum=5,
+        largeTrades=[],
+    )
+
+
 class OrderbookSummaryResponse(BaseModel):
     market_id: str = Field(alias="marketId")
     token_id: str = Field(alias="tokenId")
@@ -92,6 +162,10 @@ class OrderbookSummaryResponse(BaseModel):
     trade_count: int = Field(alias="tradeCount")
     liquidity: LiquiditySummary
     trade_pressure: TradePressureSummary = Field(alias="tradePressure")
+    whale_activity: WhaleActivityResponse = Field(
+        default_factory=default_whale_activity,
+        alias="whaleActivity",
+    )
 
     model_config = {"populate_by_name": True}
 

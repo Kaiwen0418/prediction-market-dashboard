@@ -34,7 +34,11 @@ Required GitHub secrets for Vercel deploy workflows:
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 
-Backend deployment is expected to be handled by Railway GitHub integration or a separate Railway pipeline. Do not assume the GitHub Actions workflows deploy the FastAPI service unless Railway automation is explicitly configured.
+The backend test deployment runs on `frodo@192.168.1.131` using `deploy/local.compose.yml`;
+update it with `deploy/update-local.sh`. The public API is `https://predict-test.project-echo.xyz`.
+Railway is offline and its GitHub source is disconnected. Frontend hosting stays on Vercel.
+The user authorized integration of PR #15 after adding automatic database capacity overwrite.
+Surveillance capacity eviction may discard test data, including case-pinned evidence.
 
 ## Local Environment
 

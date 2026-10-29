@@ -3,8 +3,11 @@ export type TimePoint = {
   value: number;
 };
 
+export type MarketStatus = "open" | "closed" | "inactive" | "unknown";
+
 export type MarketSnapshot = {
   marketId: string;
+  conditionId?: string;
   eventId?: string;
   tokenId?: string;
   slug: string;
@@ -17,9 +20,39 @@ export type MarketSnapshot = {
   liquidity?: number;
   image?: string;
   description?: string;
+  endDate?: string;
+  resolutionSource?: string;
+  venue?: string;
+  status: MarketStatus;
   outcomeLabel?: string;
   contractLabel?: string;
   updatedAt: string;
+};
+
+export type VenueMarketSummary = {
+  venue: "Kalshi";
+  eventTicker: string;
+  marketTicker: string;
+  seriesTicker: string;
+  title: string;
+  outcomeLabel?: string;
+  probability: number;
+  volume24h: number;
+  liquidity?: number;
+  status: MarketStatus;
+  endDate?: string;
+  resolutionSource?: string;
+  url: string;
+  updatedAt: string;
+};
+
+export type KalshiMarketAnalytics = {
+  venue: "Kalshi";
+  market: MarketSnapshot;
+  orderbook: OrderbookState;
+  orderbookSummary: OrderbookSummary;
+  marketSeries: TimePoint[];
+  replay: LiveReplay;
 };
 
 export type OrderbookLevel = {
@@ -33,6 +66,15 @@ export type TradePrint = {
   price: number;
   size: number;
   timestamp: string;
+  walletAddress?: string;
+};
+
+export type MarketTradePrint = TradePrint & {
+  conditionId: string;
+  marketSlug: string;
+  eventSlug?: string;
+  title: string;
+  outcome?: string;
 };
 
 export type OrderbookState = {
@@ -70,6 +112,36 @@ export type OrderbookSummary = {
     sellVolume: number;
     ratio: number;
     pressure: "buy" | "sell" | "balanced";
+  };
+  whaleActivity?: {
+    status: "insufficient-data" | "clear" | "detected";
+    sampleSize: number;
+    medianTradeSize: number;
+    historicalMultipleThreshold: number;
+    depthShareThreshold: number;
+    minimumSampleSize: number;
+    attributionAvailable: boolean;
+    attributedTradeCount: number;
+    uniqueWalletCount: number;
+    walletSampleMinimum: number;
+    walletConcentrationStatus: "unavailable" | "insufficient-data" | "available";
+    walletConcentrationScore: number | null;
+    topWalletVolumeShare: number | null;
+    walletReputationStatus: "unavailable" | "insufficient-history" | "available";
+    walletReputationScore: number | null;
+    walletResolvedMarketCount: number;
+    walletResolvedMarketMinimum: number;
+    largeTrades: Array<{
+      tradeId: string;
+      side: "buy" | "sell";
+      price: number;
+      size: number;
+      timestamp: string;
+      notionalUsd: number;
+      historicalSizeMultiple: number;
+      executableDepthShare: number;
+      walletAddress?: string | null;
+    }>;
   };
 };
 

@@ -14,23 +14,28 @@ type UseOrderbookOptions = {
   enableRealtime?: boolean;
   strictSnapshot?: boolean;
   allowMockStreamFallback?: boolean;
+  conditionId?: string;
 };
 
 export function useOrderbook(tokenId?: string, options: UseOrderbookOptions = {}) {
-  const { strictSnapshot = false, allowMockStreamFallback = true, enableRealtime = true } = options;
+  const { strictSnapshot = false, allowMockStreamFallback = true, enableRealtime = true, conditionId } = options;
   const orderbook = useOrderbookStore((state) => state.orderbook);
   const upsertOrderbook = useOrderbookStore((state) => state.upsertOrderbook);
   const resetOrderbook = useOrderbookStore((state) => state.resetOrderbook);
   const pushEvents = useRawEventStore((state) => state.pushEvents);
 
   const snapshotQuery = useQuery({
-    queryKey: ["orderbook-snapshot", tokenId, strictSnapshot ? "strict" : "fallback"],
-    queryFn: () => (strictSnapshot ? getOrderbookSnapshotStrict(tokenId) : getOrderbookSnapshot(tokenId)),
+    queryKey: ["orderbook-snapshot", tokenId, conditionId, strictSnapshot ? "strict" : "fallback"],
+    queryFn: () =>
+      strictSnapshot
+        ? getOrderbookSnapshotStrict(tokenId, conditionId)
+        : getOrderbookSnapshot(tokenId, conditionId),
+    placeholderData: (previous) => previous,
     refetchInterval: tokenId ? 30_000 : 15_000
   });
 
   useEffect(() => {
-    resetOrderbook();
+    if (!tokenId) resetOrderbook();
   }, [resetOrderbook, tokenId]);
 
   useEffect(() => {
@@ -43,7 +48,8 @@ export function useOrderbook(tokenId?: string, options: UseOrderbookOptions = {}
     (events: ReturnType<typeof routeMarketStreamMessage>) => {
       pushEvents(events);
 
-      let nextOrderbook = orderbook;
+      let nextOrderbook =
+        orderbook?.tokenId === tokenId ? orderbook : null;
       for (const event of events) {
         nextOrderbook = mergeNormalizedBookEvent(nextOrderbook, event);
       }
@@ -51,7 +57,7 @@ export function useOrderbook(tokenId?: string, options: UseOrderbookOptions = {}
         upsertOrderbook(nextOrderbook);
       }
     },
-    [orderbook, pushEvents, upsertOrderbook]
+    [orderbook, pushEvents, tokenId, upsertOrderbook]
   );
 
   const connect = useCallback(

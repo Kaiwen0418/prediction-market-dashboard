@@ -18,7 +18,9 @@ export function useDashboardData() {
   const { featuredMarketQuery, historicalSeriesQuery, featuredMarket } = useMarketData();
   const pollingQuery = usePollingData(featuredMarket);
   const timelineQuery = useTimelineData(featuredMarket);
-  const { orderbook, snapshotQuery } = useOrderbook(featuredMarket?.tokenId);
+  const { orderbook, snapshotQuery } = useOrderbook(featuredMarket?.tokenId, {
+    conditionId: featuredMarket?.conditionId
+  });
 
   const marketFromStore = useMarketStore((state) => state.featuredMarket);
   const marketSeries = useMarketStore((state) => state.series);

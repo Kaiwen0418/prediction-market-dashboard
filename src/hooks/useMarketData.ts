@@ -25,13 +25,18 @@ export function useMarketData(options: UseMarketDataOptions = {}) {
       }
       return strictFeaturedMarket ? getFeaturedMarketStrict() : getFeaturedMarket();
     },
-    initialData: initialFeaturedMarket ?? undefined
+    initialData: initialFeaturedMarket ?? undefined,
+    placeholderData: (previous) => previous,
+    staleTime: 5 * 60_000,
+    gcTime: 60 * 60_000,
+    retry: 2
   });
 
   const historicalSeriesQuery = useQuery({
     queryKey: ["historical-market-series", featuredMarketQuery.data?.tokenId ?? initialFeaturedMarket?.tokenId],
     queryFn: () => getHistoricalMarketSeries(featuredMarketQuery.data?.tokenId ?? initialFeaturedMarket?.tokenId),
-    enabled: Boolean(featuredMarketQuery.data ?? initialFeaturedMarket)
+    enabled: Boolean(featuredMarketQuery.data ?? initialFeaturedMarket),
+    placeholderData: (previous) => previous
   });
 
   useEffect(() => {
@@ -48,7 +53,9 @@ export function useMarketData(options: UseMarketDataOptions = {}) {
 
   return {
     featuredMarket: featuredMarketQuery.data ?? initialFeaturedMarket,
-    marketSeries: historicalSeriesQuery.data ?? [],
+    marketSeries: historicalSeriesQuery.isPlaceholderData
+      ? []
+      : historicalSeriesQuery.data ?? [],
     featuredMarketQuery,
     historicalSeriesQuery
   };

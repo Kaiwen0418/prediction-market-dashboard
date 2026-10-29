@@ -1,4 +1,5 @@
 import json
+import math
 from functools import lru_cache
 from pathlib import Path
 from datetime import datetime, timezone
@@ -16,11 +17,15 @@ from app.analytics.series import (
 )
 from app.schemas.analytics import EventWindowRequest, LeadLagRequest
 from app.schemas.research import (
+    CatalystEventResponse,
+    ComparedMarketResponse,
+    ElectionModelComparisonResponse,
     ResearchOverviewItemResponse,
     ResearchOverviewResponse,
     ResearchCoverageResponse,
     ResearchHighlightsResponse,
     ResearchNarrativeResponse,
+    RelatedMarketDivergenceResponse,
     PollPointResponse,
     ResearchProvenanceResponse,
     ResearchStateSummaryResponse,
@@ -50,6 +55,37 @@ STATE_REGISTRY = {
         "eventSlug": "wisconsin-presidential-election-winner",
     },
 }
+
+MARKET_HISTORY_SOURCE_URL = "/data/polymarket-history-2024.json"
+RELATED_MARKET_FEE_BPS_PER_LEG = 0.0
+RELATED_MARKET_MINIMUM_LIQUIDITY_USD = 5_000.0
+
+POLITICAL_CATALYSTS = (
+    {
+        "id": "2024-presidential-debate-atlanta",
+        "headline": "Presidential debate in Atlanta",
+        "eventType": "debate",
+        "occurredAt": "2024-06-27T21:00:00Z",
+        "sourceName": "The American Presidency Project",
+        "sourceUrl": "https://www.presidency.ucsb.edu/documents/presidential-debate-atlanta-georgia",
+    },
+    {
+        "id": "2024-republican-national-convention",
+        "headline": "Republican National Convention opened",
+        "eventType": "scheduled-event",
+        "occurredAt": "2024-07-15T13:00:00Z",
+        "sourceName": "Republican National Committee",
+        "sourceUrl": "https://prod-static.gop.com/media/documents/2024_Call_of_the_Convention_as_adopted_11.20.23_1700517775.pdf",
+    },
+    {
+        "id": "2024-biden-withdrawal",
+        "headline": "President Biden ended his reelection campaign",
+        "eventType": "candidate-event",
+        "occurredAt": "2024-07-21T18:46:00Z",
+        "sourceName": "The American Presidency Project",
+        "sourceUrl": "https://www.presidency.ucsb.edu/documents/letter-the-nation-announcing-decision-not-seek-reelection",
+    },
+)
 
 
 @lru_cache
@@ -136,6 +172,111 @@ def _build_coverage(
     )
 
 
+def _build_related_market_divergence(
+    dataset: dict[str, Any],
+    state: str,
+    party: Party,
+) -> RelatedMarketDivergenceResponse:
+    state_data = next((entry for entry in dataset["states"] if entry["state"] == state), None)
+    related_party: Party = "Democrat" if party == "Republican" else "Republican"
+    primary_payload = state_data.get("parties", {}).get(party) if state_data else None
+    related_payload = state_data.get("parties", {}).get(related_party) if state_data else None
+    primary_point = primary_payload.get("series", [])[-1]
+    related_point = related_payload.get("series", [])[-1]
+    probability_sum = float(primary_point["value"]) + float(related_point["value"])
+    raw_gap_points = abs(1.0 - probability_sum) * 100
+    fee_buffer_points = RELATED_MARKET_FEE_BPS_PER_LEG * 2 / 100
+    actionable_gap_points = max(0.0, raw_gap_points - fee_buffer_points)
+
+    return RelatedMarketDivergenceResponse(
+        primary=ComparedMarketResponse(
+            label=party,
+            probability=float(primary_point["value"]),
+            observedAt=primary_point["timestamp"],
+            sourceUrl=MARKET_HISTORY_SOURCE_URL,
+        ),
+        related=ComparedMarketResponse(
+            label=related_party,
+            probability=float(related_point["value"]),
+            observedAt=related_point["timestamp"],
+            sourceUrl=MARKET_HISTORY_SOURCE_URL,
+        ),
+        rawProbabilitySum=round(probability_sum, 4),
+        rawGapPoints=round(raw_gap_points, 2),
+        feeBpsPerLeg=RELATED_MARKET_FEE_BPS_PER_LEG,
+        feeBufferPoints=round(fee_buffer_points, 2),
+        actionableGapPoints=round(actionable_gap_points, 2),
+        liquidityUsd=None,
+        minimumLiquidityUsd=RELATED_MARKET_MINIMUM_LIQUIDITY_USD,
+        status="insufficient-liquidity-data",
+        explanation=(
+            "The complementary outcomes are checked for probability inconsistency after the configured fee buffer. "
+            "The historical bundle does not contain executable liquidity, so no actionable arbitrage alert is emitted."
+        ),
+    )
+
+
+def _build_catalysts(market_series: list[TimePointResponse]) -> list[CatalystEventResponse]:
+    if len(market_series) < 2:
+        return []
+
+    catalysts: list[CatalystEventResponse] = []
+    for event in POLITICAL_CATALYSTS:
+        event_time = datetime.fromisoformat(event["occurredAt"].replace("Z", "+00:00"))
+        index = min(
+            range(len(market_series)),
+            key=lambda candidate: abs(
+                datetime.fromisoformat(
+                    market_series[candidate].timestamp.replace("Z", "+00:00")
+                )
+                - event_time
+            ),
+        )
+        previous_index = max(0, index - 1)
+        move = (market_series[index].value - market_series[previous_index].value) * 100
+        catalysts.append(
+            CatalystEventResponse(
+                id=event["id"],
+                headline=event["headline"],
+                eventType=event["eventType"],
+                occurredAt=event["occurredAt"],
+                sourceName=event["sourceName"],
+                sourceUrl=event["sourceUrl"],
+                matchedMarketTimestamp=market_series[index].timestamp,
+                marketMove=round(move, 2),
+                summary=(
+                    f"Nearest cached market observation moved {move:+.2f} points from its preceding sample. "
+                    "This is temporal correlation, not a claim of causation."
+                ),
+            )
+        )
+    return catalysts
+
+
+def _build_election_model_comparison(
+    poll_series: list[PollPointResponse],
+    market_series: list[TimePointResponse],
+) -> ElectionModelComparisonResponse:
+    latest_poll = poll_series[-1]
+    latest_market = market_series[-1]
+    logit_input = (latest_poll.poll_average - 0.5) / 0.03
+    model_probability = 1.0 / (1.0 + math.exp(-logit_input))
+
+    return ElectionModelComparisonResponse(
+        modelName="PMI polling-derived logistic baseline",
+        modelProbability=round(model_probability, 4),
+        marketProbability=round(latest_market.value, 4),
+        divergencePoints=round((latest_market.value - model_probability) * 100, 2),
+        pollObservedAt=latest_poll.timestamp,
+        marketObservedAt=latest_market.timestamp,
+        sourceUrl="/data/state-party-support-2024.json",
+        methodology=(
+            "Transforms the latest two-party polling margin through a logistic curve with a three-point scale. "
+            "This transparent research baseline is not a calibrated election forecast."
+        ),
+    )
+
+
 def get_research_summary(state: str, party: Party) -> ResearchStateSummaryResponse:
     if state not in STATE_REGISTRY:
         raise HTTPException(status_code=404, detail=f"Unsupported battleground state: {state}")
@@ -163,6 +304,16 @@ def get_research_summary(state: str, party: Party) -> ResearchStateSummaryRespon
     divergence = calculate_divergence(analytics_payload)
     rolling_correlation = calculate_rolling_correlation(analytics_payload)
     coverage = _build_coverage(poll_series, market_series)
+    related_market_divergence = _build_related_market_divergence(
+        market_dataset,
+        state,
+        party,
+    )
+    catalysts = _build_catalysts(market_series)
+    election_model_comparison = _build_election_model_comparison(
+        poll_series,
+        market_series,
+    )
     market_values = [point.value for point in market_series]
     if len(market_values) > 1:
         deltas = [abs(market_values[index] - market_values[index - 1]) for index in range(1, len(market_values))]
@@ -183,8 +334,8 @@ def get_research_summary(state: str, party: Party) -> ResearchStateSummaryRespon
         eventSlug=event_slug,
         party=party,
         summary=(
-            f"FiveThirtyEight {party} state support matched against a cached Polymarket history snapshot for {state}, "
-            "with lead-lag, correlation, volatility, divergence, and rolling-correlation computed by the FastAPI + NumPy backend."
+            f"FiveThirtyEight {party} state support compared with Polymarket history for {state}, "
+            "including lead-lag, correlation, volatility, divergence, and rolling-correlation analysis."
         ),
         analyticsSource="api",
         researchSource="api",
@@ -220,14 +371,17 @@ def get_research_summary(state: str, party: Party) -> ResearchStateSummaryRespon
                 f"{lead_lag.interpretation.lower()}."
             ),
             methodology=(
-                "Poll and market series are date-aligned first, then FastAPI + NumPy computes lead-lag, "
+                "Poll and market series are aligned by date before the service calculates lead-lag, "
                 "correlation, divergence, volatility, rolling correlation, and the largest event-window shock."
             ),
         ),
         sourceUrls=[
             "/data/state-party-support-2024.json",
-            "/data/polymarket-history-2024.json",
+            MARKET_HISTORY_SOURCE_URL,
         ],
+        relatedMarketDivergence=related_market_divergence,
+        electionModelComparison=election_model_comparison,
+        catalysts=catalysts,
     )
 
 

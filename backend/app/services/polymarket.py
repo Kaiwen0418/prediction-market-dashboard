@@ -1,15 +1,21 @@
 import asyncio
 import json
+import re
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
+from weakref import WeakValueDictionary
 
 import httpx
 from fastapi import HTTPException
 
 from app.core.config import get_settings
+from app.services.upstream_rate_limit import upstream_rate_limiter
 from app.schemas.polymarket import (
     FeaturedMarketResponse,
+    LargeTradeResponse,
     LiquiditySummary,
     MarketContextResponse,
     OrderbookLevel,
@@ -18,19 +24,148 @@ from app.schemas.polymarket import (
     TimelineEventResponse,
     TradePressureSummary,
     TradePrint,
+    WhaleActivityResponse,
+)
+from app.analytics.whale_activity import (
+    DEPTH_SHARE_THRESHOLD,
+    HISTORICAL_MULTIPLE_THRESHOLD,
+    MINIMUM_SAMPLE_SIZE,
+    WALLET_SAMPLE_MINIMUM,
+    WALLET_RESOLVED_MARKET_MINIMUM,
+    analyze_whale_activity,
 )
 
 
-async def fetch_json(url: str) -> Any:
+WALLET_ADDRESS_PATTERN = re.compile(r"^0x[a-fA-F0-9]{40}$")
+
+
+@dataclass(frozen=True)
+class CachedJsonResponse:
+    payload: Any
+    stored_at: float
+
+
+class JsonResponseCache:
+    def __init__(self) -> None:
+        self._entries: dict[str, CachedJsonResponse] = {}
+        self._locks: WeakValueDictionary[str, asyncio.Lock] = (
+            WeakValueDictionary()
+        )
+
+    def get(self, url: str, max_age_seconds: float, now: float | None = None) -> Any | None:
+        entry = self._entries.get(url)
+        if entry is None:
+            return None
+        current_time = time.monotonic() if now is None else now
+        if current_time - entry.stored_at > max_age_seconds:
+            return None
+        return entry.payload
+
+    def put(self, url: str, payload: Any, now: float | None = None) -> None:
+        if len(self._entries) >= 2_048 and url not in self._entries:
+            oldest_url = min(
+                self._entries,
+                key=lambda key: self._entries[key].stored_at,
+            )
+            self._entries.pop(oldest_url, None)
+        self._entries[url] = CachedJsonResponse(
+            payload=payload,
+            stored_at=time.monotonic() if now is None else now,
+        )
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self._locks.clear()
+
+    def lock_for(self, url: str) -> asyncio.Lock:
+        lock = self._locks.get(url)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[url] = lock
+        return lock
+
+
+json_response_cache = JsonResponseCache()
+
+
+async def fetch_json(
+    url: str,
+    cache_ttl_seconds: int = 0,
+    stale_if_error_seconds: int = 0,
+) -> Any:
+    if cache_ttl_seconds > 0:
+        cached = json_response_cache.get(url, cache_ttl_seconds)
+        if cached is not None:
+            return cached
+
+        async with json_response_cache.lock_for(url):
+            cached = json_response_cache.get(url, cache_ttl_seconds)
+            if cached is not None:
+                return cached
+            return await _fetch_json_upstream(
+                url,
+                cache_ttl_seconds,
+                stale_if_error_seconds,
+            )
+
+    return await _fetch_json_upstream(
+        url,
+        cache_ttl_seconds,
+        stale_if_error_seconds,
+    )
+
+
+async def _fetch_json_upstream(
+    url: str,
+    cache_ttl_seconds: int,
+    stale_if_error_seconds: int,
+) -> Any:
     settings = get_settings()
     timeout = httpx.Timeout(settings.request_timeout_seconds)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        response = await client.get(url, headers={"Accept": "application/json"})
+    try:
+        await upstream_rate_limiter.acquire_url(url)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(url, headers={"Accept": "application/json"})
 
-    if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
+        if response.status_code >= 400:
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After", "1")
+                try:
+                    cooldown_seconds = min(max(float(retry_after), 1.0), 60.0)
+                except ValueError:
+                    cooldown_seconds = 1.0
+                upstream_rate_limiter.penalize_url(url, cooldown_seconds)
+            raise HTTPException(status_code=response.status_code, detail=response.text)
 
-    return response.json()
+        payload = response.json()
+        if cache_ttl_seconds > 0:
+            json_response_cache.put(url, payload)
+        return payload
+    except HTTPException as error:
+        can_use_stale = error.status_code == 429 or error.status_code >= 500
+        stale = (
+            json_response_cache.get(
+                url,
+                cache_ttl_seconds + stale_if_error_seconds,
+            )
+            if can_use_stale and stale_if_error_seconds > 0
+            else None
+        )
+        if stale is not None:
+            return stale
+        raise
+    except httpx.HTTPError as error:
+        stale = (
+            json_response_cache.get(
+                url,
+                cache_ttl_seconds + stale_if_error_seconds,
+            )
+            if stale_if_error_seconds > 0
+            else None
+        )
+        if stale is not None:
+            return stale
+        raise HTTPException(status_code=502, detail="Upstream market request failed") from error
 
 
 async def fetch_featured_market(slug: str | None = None) -> Any:
@@ -41,10 +176,44 @@ async def fetch_featured_market(slug: str | None = None) -> Any:
 
     by_slug_url = f"{settings.gamma_base_url}/events/slug/{quote(selected_slug, safe='')}"
     try:
-        return await fetch_json(by_slug_url)
+        return await fetch_json(
+            by_slug_url,
+            cache_ttl_seconds=settings.polymarket_market_cache_ttl_seconds,
+            stale_if_error_seconds=settings.polymarket_market_stale_if_error_seconds,
+        )
     except HTTPException:
         fallback_url = f"{settings.gamma_base_url}/events?slug={quote(selected_slug, safe='')}"
-        return await fetch_json(fallback_url)
+        return await fetch_json(
+            fallback_url,
+            cache_ttl_seconds=settings.polymarket_market_cache_ttl_seconds,
+            stale_if_error_seconds=settings.polymarket_market_stale_if_error_seconds,
+        )
+
+
+async def fetch_market_events(slugs: list[str]) -> list[Any]:
+    settings = get_settings()
+    normalized_slugs = list(
+        dict.fromkeys(slug.strip() for slug in slugs if slug.strip())
+    )[:100]
+    if not normalized_slugs:
+        raise HTTPException(status_code=400, detail="slugs are required")
+    if any(len(slug) > 220 for slug in normalized_slugs):
+        raise HTTPException(status_code=400, detail="invalid market slug")
+
+    query = urlencode(
+        [
+            *[("slug", slug) for slug in normalized_slugs],
+            ("closed", "false"),
+            ("limit", str(len(normalized_slugs))),
+        ]
+    )
+    payload = await fetch_json(
+        f"{settings.gamma_base_url}/events/keyset?{query}",
+        cache_ttl_seconds=settings.polymarket_market_cache_ttl_seconds,
+        stale_if_error_seconds=settings.polymarket_market_stale_if_error_seconds,
+    )
+    events = payload.get("events", []) if isinstance(payload, dict) else []
+    return events if isinstance(events, list) else []
 
 
 async def fetch_orderbook(token_id: str) -> Any:
@@ -52,7 +221,11 @@ async def fetch_orderbook(token_id: str) -> Any:
     if not token_id.strip():
         raise HTTPException(status_code=400, detail="tokenId is required")
     url = f"{settings.clob_base_url}/book?token_id={quote(token_id, safe='')}"
-    return await fetch_json(url)
+    return await fetch_json(
+        url,
+        cache_ttl_seconds=settings.polymarket_orderbook_cache_ttl_seconds,
+        stale_if_error_seconds=settings.polymarket_realtime_stale_if_error_seconds,
+    )
 
 
 async def fetch_price_history(market: str) -> Any:
@@ -60,15 +233,27 @@ async def fetch_price_history(market: str) -> Any:
     if not market.strip():
         raise HTTPException(status_code=400, detail="market is required")
     url = f"{settings.clob_base_url}/prices-history?interval=all&market={quote(market, safe='')}&fidelity=720"
-    return await fetch_json(url)
+    return await fetch_json(
+        url,
+        cache_ttl_seconds=settings.polymarket_history_cache_ttl_seconds,
+        stale_if_error_seconds=settings.polymarket_market_stale_if_error_seconds,
+    )
 
 
-async def fetch_trades(token_id: str) -> Any:
+async def fetch_trades(condition_id: str | None = None, limit: int = 100) -> Any:
     settings = get_settings()
-    if not token_id.strip():
-        raise HTTPException(status_code=400, detail="tokenId is required")
-    url = f"{settings.gamma_base_url}/trades?limit=20&market={quote(token_id, safe='')}"
-    return await fetch_json(url)
+    safe_limit = max(1, min(limit, 100))
+    market_query = (
+        f"&market={quote(condition_id.strip(), safe='')}"
+        if condition_id and condition_id.strip()
+        else ""
+    )
+    url = f"{settings.data_api_base_url}/trades?limit={safe_limit}&takerOnly=true{market_query}"
+    return await fetch_json(
+        url,
+        cache_ttl_seconds=settings.polymarket_trades_cache_ttl_seconds,
+        stale_if_error_seconds=settings.polymarket_realtime_stale_if_error_seconds,
+    )
 
 
 def _as_number(value: Any, fallback: float = 0.0) -> float:
@@ -132,6 +317,7 @@ def normalize_featured_market_from_event(payload: Any) -> FeaturedMarketResponse
         candidates.append(
             FeaturedMarketResponse(
                 marketId=_as_string(market.get("id"), _as_string(market.get("conditionId"), token_id)),
+                conditionId=_as_string(market.get("conditionId")) or None,
                 eventId=_as_string(payload.get("id")) or None,
                 tokenId=token_id,
                 slug=_as_string(payload.get("slug"), token_id),
@@ -268,31 +454,50 @@ def _normalize_trades(value: Any) -> list[TradePrint]:
             timestamp = _as_string(raw_timestamp, datetime.now(timezone.utc).isoformat())
         price = _as_number(row.get("price"))
         size = _as_number(row.get("size"))
+        wallet_address = _as_string(row.get("proxyWallet"), _as_string(row.get("proxy_wallet")))
+        if not WALLET_ADDRESS_PATTERN.fullmatch(wallet_address):
+            wallet_address = ""
+        else:
+            wallet_address = wallet_address.lower()
         if price <= 0 or size <= 0:
             continue
         trades.append(
             TradePrint(
-                id=_as_string(row.get("id"), f"trade-{index}"),
+                id=_as_string(
+                    row.get("id"),
+                    _as_string(row.get("transactionHash"), f"trade-{index}"),
+                ),
                 side=side,
                 price=price,
                 size=size,
                 timestamp=timestamp,
+                walletAddress=wallet_address or None,
             )
         )
     return trades
 
 
-async def fetch_orderbook_summary(token_id: str) -> OrderbookSummaryResponse:
+async def fetch_orderbook_summary(
+    token_id: str,
+    condition_id: str | None = None,
+) -> OrderbookSummaryResponse:
     if not token_id.strip():
         raise HTTPException(status_code=400, detail="tokenId is required")
 
     orderbook_payload, trades_payload = await asyncio.gather(
         fetch_orderbook(token_id),
-        fetch_trades(token_id),
+        fetch_trades(condition_id) if condition_id else asyncio.sleep(0, result=[]),
+        return_exceptions=True,
     )
 
+    if isinstance(orderbook_payload, HTTPException):
+        raise orderbook_payload
+    if isinstance(orderbook_payload, BaseException):
+        raise HTTPException(status_code=502, detail="Orderbook request failed") from orderbook_payload
     if not isinstance(orderbook_payload, dict):
         raise HTTPException(status_code=502, detail="Orderbook payload was not an object")
+    if isinstance(trades_payload, BaseException):
+        trades_payload = []
 
     bids = _normalize_levels(orderbook_payload.get("bids"))
     asks = _normalize_levels(orderbook_payload.get("asks"))
@@ -313,6 +518,11 @@ async def fetch_orderbook_summary(token_id: str) -> OrderbookSummaryResponse:
     sell_volume = sum(trade.size for trade in trades if trade.side == "sell")
     ratio = buy_volume if sell_volume == 0 else buy_volume / sell_volume
     pressure = "buy" if ratio > 1.15 else "sell" if ratio < 0.87 else "balanced"
+    whale_activity = analyze_whale_activity(
+        trades,
+        total_bid_depth=total_bid_depth,
+        total_ask_depth=total_ask_depth,
+    )
 
     return OrderbookSummaryResponse(
         marketId=_as_string(orderbook_payload.get("market"), token_id),
@@ -337,6 +547,39 @@ async def fetch_orderbook_summary(token_id: str) -> OrderbookSummaryResponse:
             ratio=round(ratio, 2),
             pressure=pressure,
         ),
+        whaleActivity=WhaleActivityResponse(
+            status=whale_activity.status,
+            sampleSize=whale_activity.sample_size,
+            medianTradeSize=whale_activity.median_trade_size,
+            historicalMultipleThreshold=HISTORICAL_MULTIPLE_THRESHOLD,
+            depthShareThreshold=DEPTH_SHARE_THRESHOLD,
+            minimumSampleSize=MINIMUM_SAMPLE_SIZE,
+            attributionAvailable=whale_activity.attributed_trade_count > 0,
+            attributedTradeCount=whale_activity.attributed_trade_count,
+            uniqueWalletCount=whale_activity.unique_wallet_count,
+            walletSampleMinimum=WALLET_SAMPLE_MINIMUM,
+            walletConcentrationStatus=whale_activity.wallet_concentration_status,
+            walletConcentrationScore=whale_activity.wallet_concentration_score,
+            topWalletVolumeShare=whale_activity.top_wallet_volume_share,
+            walletReputationStatus=whale_activity.wallet_reputation_status,
+            walletReputationScore=whale_activity.wallet_reputation_score,
+            walletResolvedMarketCount=whale_activity.wallet_resolved_market_count,
+            walletResolvedMarketMinimum=WALLET_RESOLVED_MARKET_MINIMUM,
+            largeTrades=[
+                LargeTradeResponse(
+                    tradeId=detection.trade_id,
+                    side=detection.side,
+                    price=detection.price,
+                    size=detection.size,
+                    timestamp=detection.timestamp,
+                    notionalUsd=detection.notional_usd,
+                    historicalSizeMultiple=detection.historical_size_multiple,
+                    executableDepthShare=detection.executable_depth_share,
+                    walletAddress=detection.wallet_address,
+                )
+                for detection in whale_activity.detections
+            ],
+        ),
     )
 
 
@@ -345,7 +588,10 @@ async def fetch_market_context(slug: str | None = None) -> MarketContextResponse
     featured_market = normalize_featured_market_from_event(featured_event)
 
     orderbook_summary = (
-        await fetch_orderbook_summary(featured_market.token_id)
+        await fetch_orderbook_summary(
+            featured_market.token_id,
+            featured_market.condition_id,
+        )
         if featured_market.token_id
         else None
     )

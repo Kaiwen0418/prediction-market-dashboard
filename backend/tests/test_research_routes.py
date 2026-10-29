@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.api import routes_research
+from app.services.research import get_research_summary
 from app.schemas.analytics import CorrelationResponse, DivergenceResponse, EventWindowResponse, LeadLagResponse, RollingCorrelationResponse, VolatilityResponse
 from app.schemas.research import (
     ResearchCoverageResponse,
@@ -14,6 +15,28 @@ from app.schemas.research import (
     ResearchProvenanceResponse,
     ResearchStateSummaryResponse,
 )
+
+
+class ResearchServiceTestCase(unittest.TestCase):
+    def test_related_market_and_catalyst_outputs_are_traceable(self) -> None:
+        summary = get_research_summary("Arizona", "Republican")
+
+        divergence = summary.related_market_divergence
+        self.assertTrue(divergence.primary.observed_at)
+        self.assertTrue(divergence.related.observed_at)
+        self.assertGreaterEqual(divergence.fee_buffer_points, 0)
+        self.assertEqual(divergence.status, "insufficient-liquidity-data")
+        self.assertIsNone(divergence.liquidity_usd)
+
+        model = summary.election_model_comparison
+        self.assertGreaterEqual(model.model_probability, 0)
+        self.assertLessEqual(model.model_probability, 1)
+        self.assertTrue(model.poll_observed_at)
+        self.assertTrue(model.market_observed_at)
+
+        self.assertEqual(len(summary.catalysts), 3)
+        self.assertTrue(all(event.source_url.startswith("https://") for event in summary.catalysts))
+        self.assertTrue(all(event.matched_market_timestamp for event in summary.catalysts))
 
 
 class ResearchRoutesTestCase(unittest.TestCase):
@@ -68,6 +91,52 @@ class ResearchRoutesTestCase(unittest.TestCase):
                 ),
                 narrative=ResearchNarrativeResponse(overview="Overview", methodology="Methodology"),
                 sourceUrls=["/data/state-party-support-2024.json"],
+                relatedMarketDivergence={
+                    "primary": {
+                        "label": party,
+                        "probability": 0.55,
+                        "observedAt": "2024-01-02T00:00:00.000Z",
+                        "sourceUrl": "/data/polymarket-history-2024.json",
+                    },
+                    "related": {
+                        "label": "Democrat" if party == "Republican" else "Republican",
+                        "probability": 0.44,
+                        "observedAt": "2024-01-02T00:00:00.000Z",
+                        "sourceUrl": "/data/polymarket-history-2024.json",
+                    },
+                    "rawProbabilitySum": 0.99,
+                    "rawGapPoints": 1.0,
+                    "feeBpsPerLeg": 0,
+                    "feeBufferPoints": 0,
+                    "actionableGapPoints": 1.0,
+                    "liquidityUsd": None,
+                    "minimumLiquidityUsd": 5_000,
+                    "status": "insufficient-liquidity-data",
+                    "explanation": "Liquidity is unavailable.",
+                },
+                electionModelComparison={
+                    "modelName": "Test model",
+                    "modelProbability": 0.57,
+                    "marketProbability": 0.55,
+                    "divergencePoints": -2.0,
+                    "pollObservedAt": "2024-01-01T00:00:00.000Z",
+                    "marketObservedAt": "2024-01-02T00:00:00.000Z",
+                    "sourceUrl": "/data/state-party-support-2024.json",
+                    "methodology": "Transparent test model.",
+                },
+                catalysts=[
+                    {
+                        "id": "debate",
+                        "headline": "Presidential debate",
+                        "eventType": "debate",
+                        "occurredAt": "2024-01-01T00:00:00.000Z",
+                        "sourceName": "Test source",
+                        "sourceUrl": "https://example.com/source",
+                        "matchedMarketTimestamp": "2024-01-02T00:00:00.000Z",
+                        "marketMove": 5.0,
+                        "summary": "Temporal correlation only.",
+                    }
+                ],
             )
 
         def fake_get_research_overview(party: str) -> ResearchOverviewResponse:
@@ -116,6 +185,9 @@ class ResearchRoutesTestCase(unittest.TestCase):
         self.assertEqual(payload["party"], "Republican")
         self.assertEqual(payload["analyticsSource"], "api")
         self.assertEqual(payload["divergence"]["currentGap"], 3.1)
+        self.assertEqual(payload["relatedMarketDivergence"]["rawGapPoints"], 1.0)
+        self.assertEqual(payload["electionModelComparison"]["modelName"], "Test model")
+        self.assertEqual(payload["catalysts"][0]["sourceName"], "Test source")
 
     def test_states_overview_route_returns_compact_cross_state_metrics(self) -> None:
         with TestClient(app) as client:
