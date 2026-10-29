@@ -1,0 +1,19 @@
+{
+  "contracts": 50000,
+  "detailed_contracts_after": 40,
+  "fixture_sha256": "c4ee904f073e7583cefafdbe6669391b2996f545a5ae55d432fdc46aa341aef1",
+  "physical_bytes": {
+    "old_markets": 109608960,
+    "old_rules": 117358592,
+    "new_markets": 41328640,
+    "new_rules": 131072
+  },
+  "old_total_bytes": 226967552,
+  "new_total_bytes": 41459712,
+  "reduction_fraction": 0.8173319858514401,
+  "sql_bulk_load_seconds": {
+    "old": 1.09917516913265,
+    "new": 2.658845689147711
+  },
+  "limits": "Repeated real rule fixture, equal SQL/index layout; not a production growth rate or worker throughput benchmark"
+}

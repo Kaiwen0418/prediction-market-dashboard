@@ -1,0 +1,175 @@
+{
+  "before_reset": {
+    "database_bytes": 13727102643,
+    "raw_bytes": 1728721225
+  },
+  "after_startup": {
+    "observed_at": "2026-10-29T10:23:19.556290+00:00",
+    "detector_version": "surveillance-v1.1",
+    "capacity": {
+      "database_bytes": 69924531,
+      "raw_bytes": 24925571
+    },
+    "contracts_per_venue": 20,
+    "catalog_seconds": 21600,
+    "automatic_min_cash_usd": 1000.0,
+    "catalog": [
+      {
+        "venue": "polymarket",
+        "contracts": 20001,
+        "embedded_rules": 0,
+        "embedded_tokens": 0,
+        "combinations": 0,
+        "settled": 1
+      },
+      {
+        "venue": "kalshi",
+        "contracts": 18100,
+        "embedded_rules": 0,
+        "embedded_tokens": 0,
+        "combinations": 0,
+        "settled": 0
+      }
+    ],
+    "rules": [
+      {
+        "venue": "kalshi",
+        "versions": 52,
+        "contracts": 52
+      },
+      {
+        "venue": "polymarket",
+        "versions": 30,
+        "contracts": 30
+      }
+    ],
+    "trades": [
+      {
+        "venue": "polymarket",
+        "rows": 384,
+        "latest_received": "2026-10-29 10:22:15.112473+00:00"
+      },
+      {
+        "venue": "kalshi",
+        "rows": 2747,
+        "latest_received": "2026-10-29 10:22:49.119943+00:00"
+      }
+    ],
+    "jobs": [
+      {
+        "venue": "kalshi",
+        "kind": "catalog",
+        "enabled": 1,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:21:28.922205+00:00"
+      },
+      {
+        "venue": "kalshi",
+        "kind": "details",
+        "enabled": 20,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:22:12.694988+00:00"
+      },
+      {
+        "venue": "kalshi",
+        "kind": "detect",
+        "enabled": 20,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:23:11.928984+00:00"
+      },
+      {
+        "venue": "kalshi",
+        "kind": "schedule",
+        "enabled": 1,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:21:19.274142+00:00"
+      },
+      {
+        "venue": "kalshi",
+        "kind": "trades",
+        "enabled": 20,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:23:11.831631+00:00"
+      },
+      {
+        "venue": "polymarket",
+        "kind": "backfill",
+        "enabled": 1,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:23:08.665967+00:00"
+      },
+      {
+        "venue": "polymarket",
+        "kind": "catalog",
+        "enabled": 1,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:23:18.465395+00:00"
+      },
+      {
+        "venue": "polymarket",
+        "kind": "details",
+        "enabled": 20,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:23:19.017672+00:00"
+      },
+      {
+        "venue": "polymarket",
+        "kind": "detect",
+        "enabled": 20,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:23:18.564313+00:00"
+      },
+      {
+        "venue": "polymarket",
+        "kind": "schedule",
+        "enabled": 1,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:21:11.946454+00:00"
+      },
+      {
+        "venue": "polymarket",
+        "kind": "trades",
+        "enabled": 20,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:23:12.899500+00:00"
+      },
+      {
+        "venue": "system",
+        "kind": "maintenance",
+        "enabled": 1,
+        "failures": 0,
+        "latest_update": "2026-10-29 10:10:33.923323+00:00"
+      }
+    ],
+    "source_hashes": {
+      "worker.py": "2e1c97f351ae9e5d3dc57e8d5d88fb3f45e4ba522c3d0ad916e52ec805e82699",
+      "storage.py": "c3fd391126c8cfa295ffc6e8d8af7bbced4d19dd7663e623c1278bbeefef3c42",
+      "normalization.py": "bc48f0e4b876bfb94bcdb86b687e510d08e59fdd3071e3c8093913adf5874100",
+      "detectors.py": "75dc68a0fb8ee69d34d6cb384775463cd5b3aeba6bef22fa62a9e8292ae052c5",
+      "collectors.py": "4a972fe5a78d9198399393303016e25409bc3358d3eceed98901cc3c19632b1c"
+    },
+    "temporary_schemas": [
+      {
+        "n": 0
+      }
+    ]
+  },
+  "comparison_note": "Old disposable dataset was truncated; startup snapshot is not an equal-coverage compression ratio. Use the 50,000-contract benchmark for that comparison.",
+  "manual_backfill_validation": {
+    "market_id": "916440",
+    "since": "2026-01-02T00:00:00Z",
+    "enabled_after_completion": false,
+    "failures": 0,
+    "completed_at": "2026-10-29T10:23:22.617440+00:00"
+  },
+  "validation": [
+    "36 surveillance tests with PostgreSQL",
+    "54 existing backend tests",
+    "Frontend typecheck/build",
+    "Public health/market-context/research HTTP 200",
+    "Three connected SSE snapshots",
+    "Production browser market-pair switch with zero runtime exceptions",
+    "Deployed core hashes match workspace",
+    "No temporary benchmark/test schemas remain"
+  ]
+}

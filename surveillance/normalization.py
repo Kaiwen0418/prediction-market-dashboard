@@ -46,7 +46,8 @@ def market(venue, row, received_at):
         result = dict(id=key, condition_id=row.get("conditionId"), title=row.get("question", ""),
                       event_ids=[str(e["id"]) for e in row.get("events", [])],
                       outcomes=outcomes, tokens=tokens, closed=bool(row.get("closed")),
-                      category=row.get("category"), tags=row.get("tags", []),
+                      category=row.get("category"), tags=[(t.get("label") or t.get("slug") or "") if isinstance(t, dict) else str(t)
+                            for t in (row.get("tags") or [])[:20]],
                       volume=number(row.get("volumeNum") or row.get("volume") or 0),
                       end_time=row.get("endDate"))
     else:
@@ -58,7 +59,22 @@ def market(venue, row, received_at):
                       closed=row.get("status") not in ("open", "active", "initialized"),
                       category=row.get("category"), tags=[], volume=number(row.get("volume_fp") or 0),
                       end_time=row.get("close_time"))
-    return dict(result, venue=venue, rules=rules, rules_hash=digest(rules), observed_at=received_at)
+    if venue == "polymarket":
+        status = row.get("umaResolutionStatus") or ("closed" if result["closed"] else "open")
+        settled = status in ("resolved", "settled", "finalized")
+        tradable = not result["closed"] and row.get("active", True) and row.get("acceptingOrders", True) and status != "proposed" and not settled
+        # Gamma markets are individual legs. comboStatus describes eligibility
+        # for the separate RFQ combo product, not a multi-leg contract type.
+        combo = False
+    else:
+        status = row.get("status", "unknown")
+        settled = status in ("settled", "finalized") or bool(row.get("result"))
+        tradable = status in ("open", "active") and not settled
+        combo = bool(row.get("mve_collection_ticker")) or key.startswith("KXMVE")
+    return dict(result, venue=venue, rules=rules, rules_hash=digest(rules), observed_at=received_at,
+                source_status=status, settled=settled, tradable=bool(tradable), is_combo=combo,
+                settlement_result=row.get("result"), combo_eligibility_status=row.get("comboStatus") if venue == "polymarket" else None,
+                source_updated_at=row.get("updated_time") or row.get("updatedAt"))
 
 
 def trade(venue, row, received_at):

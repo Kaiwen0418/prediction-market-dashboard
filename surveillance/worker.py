@@ -5,6 +5,7 @@ import logging
 
 from .collectors import Collector, ContractError
 from .discovery import Selector
+from .detectors import automatic_candidate
 from .investigations import replay, ReplayCapacityError
 from .maintenance import prune
 from .capacity import CapacityGuard
@@ -23,19 +24,32 @@ class Worker:
 
     async def seed(self):
         await self.store.enqueue("maintenance", "maintenance", "system", {})
-        for closed in (False, True):
-            await self.store.enqueue(f"catalog:polymarket:{closed}", "catalog", "polymarket", {"closed": closed})
-        await self.store.enqueue("catalog:kalshi", "catalog", "kalshi", {})
+        catalog_ids = []
+        for venue in ("polymarket", "kalshi"):
+            key = f"catalog:{venue}:active:v2"
+            catalog_ids.append(key)
+            await self.store.enqueue(key, "catalog", venue, {"closed": False, "scope": "active-v2"})
+        async with self.store.connection() as c:
+            # Repair the initial v2 flag: Gamma combo eligibility is not a combo.
+            await c.execute("""UPDATE surveillance_markets SET document=jsonb_set(document,'{is_combo}','false'::jsonb)
+                WHERE venue='polymarket' AND document->>'is_combo'='true'""")
+            # Query scope changes invalidate opaque cursors: use new job identities.
+            await c.execute("UPDATE surveillance_jobs SET enabled=false WHERE kind='catalog' AND NOT(id=ANY(%s))", (catalog_ids,))
+            # A pre-walk-marker checkpoint cannot safely expire unseen rows.
+            await c.execute("""UPDATE surveillance_jobs SET checkpoint='{}',due_at=now(),lease_until=NULL,lease_token=NULL
+                WHERE id=ANY(%s) AND checkpoint->>'cursor' IS NOT NULL
+                AND NOT(checkpoint ? 'walk_started_at')""", (catalog_ids,))
         for venue in ("polymarket", "kalshi"):
             await self.store.enqueue(f"schedule:{venue}", "schedule", venue, {})
 
     async def schedule(self, venue):
-        selector = Selector(self.settings.contracts_per_venue, self.settings.exploration_fraction)
+        selector = Selector(self.settings.contracts_per_venue, self.settings.exploration_fraction, end_grace_hours=self.settings.end_grace_hours)
         async with self.store.connection() as c:
             async with c.cursor(name="selection") as cursor:
                 cursor.itersize = 256
                 await cursor.execute("""SELECT document FROM surveillance_markets WHERE venue=%s
-                    AND document->>'closed'='false'""", (venue,))
+                    AND document->>'closed'='false' AND observed_at>=now()-(%s * interval '1 second')""",
+                    (venue,2*self.settings.catalog_seconds))
                 async for row in cursor:
                     selector.add(row["document"])
         chosen = selector.result()
@@ -43,24 +57,33 @@ class Worker:
         keys = []
         for m in chosen:
             key = m["condition_id"] or m["id"]
-            for kind in ("trades", "detect"):
+            for kind in ("details", "trades", "detect"):
                 job_id = f"{kind}:{venue}:{key}"
                 keys.append(job_id)
-                await self.store.enqueue(job_id, kind, venue, {"market_id": key})
+                await self.store.enqueue(job_id, kind, venue, {"market_id": key, "catalog_id": m["id"]})
         async with self.store.connection() as c:
             # Disabled jobs keep checkpoints and may resume on a later rotation.
             await c.execute("""UPDATE surveillance_jobs SET enabled=(id=ANY(%s)),
                 due_at=CASE WHEN NOT enabled AND id=ANY(%s) THEN now() ELSE due_at END
-                WHERE venue=%s AND kind IN ('trades','detect')""", (keys, keys, venue))
+                WHERE venue=%s AND kind IN ('details','trades','detect') AND NOT COALESCE((payload->>'manual')::boolean,false)""", (keys, keys, venue))
         await self.store.coverage(venue, "budget", {"catalog_rows": count, "selected_contracts": len(chosen),
             "budget": self.settings.contracts_per_venue, "exploration_fraction": self.settings.exploration_fraction,
             "limitations": ["Heuristic category ranking; no verified event mapping yet",
                              "REST only; order books and broadcast feeds not collected",
-                             "Kalshi historical archive catalog not yet integrated"]})
+                             "Automatic catalog: active contracts only; MVE combinations excluded",
+                             "Closed contracts are available through explicit detail/backfill jobs",
+                             "Expired schedule metadata excluded from deep sampling, not classified as settled"]})
 
     async def ingest(self, job):
         cp = dict(job["checkpoint"])
-        if job["kind"] == "trades" and not cp.get("since"):
+        if job["kind"] == "backfill":
+            rows = await self.store.fetch("SELECT document FROM surveillance_markets WHERE venue=%s AND id=%s",
+                                          (job["venue"],job["payload"]["catalog_id"]))
+            if not rows:
+                raise ContractError("Backfill requires its detail job to complete first")
+            m = rows[0]["document"]
+            job["payload"] = dict(job["payload"], market_id=m["condition_id"] or m["id"])
+        if job["kind"] in ("trades", "backfill") and not cp.get("since"):
             cp["since"] = int((datetime.now(timezone.utc) - timedelta(hours=13)).timestamp())
             await self.store.checkpoint(job, cp)
             await self.store.coverage(job["venue"], "bootstrap_horizon", {"market_id": job["payload"]["market_id"],
@@ -75,12 +98,15 @@ class Worker:
             if cursor_hash and cursor_hash in seen:
                 raise ContractError("Pagination cursor cycle; checkpoint preserved")
             cp["seen_cursors"] = (seen + [cursor_hash])[-1000:] if cursor_hash else []
-            if job["kind"] == "catalog":
+            if job["kind"] in ("catalog", "details"):
                 markets = [market(job["venue"], r, raw["received_at"]) for r in rows]
-                cp = dict(cp, cursor=cursor, pages=cp.get("pages", 0) + 1)
+                started = cp.get("walk_started_at", raw["received_at"])
+                cp = dict(cp, cursor=cursor, pages=cp.get("pages", 0) + 1, walk_started_at=started)
                 if not cursor:
-                    cp = {"completed_at": raw["received_at"], "pages": 0}
-                await self.store.commit_page(job, raw, cp, markets=markets)
+                    cp = {"completed_at": raw["received_at"], "pages": 0, "last_walk_started_at": started}
+                expire_before = started if job["kind"] == "catalog" and not cursor and job["payload"].get("scope") == "active-v2" else None
+                await self.store.commit_page(job, raw, cp, markets=markets, detailed=job["kind"] == "details",
+                                             catalog_expire_before=expire_before)
             else:
                 normalized = [trade(job["venue"], r, raw["received_at"]) for r in rows]
                 previous = cp.get("last_time")
@@ -112,7 +138,9 @@ class Worker:
                 await self.store.coverage(job["venue"], "walk_completed", {"kind": job["kind"],
                     "market_id": job["payload"].get("market_id"), "checkpoint": cp,
                     "meaning": "Completed requested walk only; not proof of upstream completeness"}, job["id"])
-                if job["kind"] == "trades":
+                if job["kind"] == "details":
+                    return self.settings.detail_seconds
+                if job["kind"] in ("trades", "backfill"):
                     return self.settings.poll_seconds
                 return self.settings.closed_catalog_seconds if job["payload"].get("closed") else self.settings.catalog_seconds
         await self.store.coverage(job["venue"], "walk_pending", {"kind": job["kind"],
@@ -138,10 +166,13 @@ class Worker:
                 as_of = datetime.now(timezone.utc).replace(second=0, microsecond=0).isoformat()
                 cases = await replay(self.store, job["venue"], job["payload"]["market_id"], as_of, persist=False, max_trades=self.settings.replay_max_trades)
                 new_cases = 0
-                for case in cases:
+                eligible_cases = [case for case in cases if automatic_candidate(case["signal"], self.settings.automatic_min_cash_usd)]
+                for case in eligible_cases:
                     new_cases += int(await self.store.save_candidate(case, self.settings.case_cooldown_seconds))
                 await self.store.checkpoint(job, {"as_of": as_of, "detected": len(cases),
-                    "new_cases": new_cases, "coalesced": len(cases) - new_cases})
+                    "new_cases": new_cases, "coalesced": len(eligible_cases) - new_cases,
+                    "suppressed_by_cost_floor": len(cases) - len(eligible_cases),
+                    "automatic_min_cash_usd": self.settings.automatic_min_cash_usd})
                 if cases:
                     # Escalation stays within the selected per-platform contract budget.
                     async with self.store.connection() as c:
@@ -150,6 +181,12 @@ class Worker:
                 delay = 60
             else:
                 delay = await self.ingest(job)
+            if job["payload"].get("manual"):
+                saved = await self.store.fetch("SELECT checkpoint FROM surveillance_jobs WHERE id=%s", (job["id"],))
+                if saved and saved[0]["checkpoint"].get("completed_at"):
+                    async with self.store.connection() as c:
+                        await self.store.fence(c, job)
+                        await c.execute("UPDATE surveillance_jobs SET enabled=false WHERE id=%s", (job["id"],))
             await self.store.release(job, delay)
         except asyncio.CancelledError:
             await self.store.release(job, 0, "worker interrupted; resume checkpoint")

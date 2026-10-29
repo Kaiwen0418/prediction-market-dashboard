@@ -86,7 +86,7 @@ class Store:
             return await (await c.execute("""
                 UPDATE surveillance_jobs SET lease_until=now()+interval '5 minutes', lease_token=%s
                 WHERE id=(SELECT id FROM surveillance_jobs WHERE enabled AND due_at<=now()
-                    AND (lease_until IS NULL OR lease_until<now()) ORDER BY due_at,id
+                    AND (lease_until IS NULL OR lease_until<now()) ORDER BY due_at,CASE kind WHEN 'details' THEN 0 ELSE 1 END,id
                     FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *
             """, (token,))).fetchone()
 
@@ -124,20 +124,35 @@ class Store:
             await self.fence(c, job)
             await c.execute("UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s", (Jsonb(checkpoint), job["id"]))
 
-    async def commit_page(self, job, raw, checkpoint, markets=(), trades=()):
+    async def commit_page(self, job, raw, checkpoint, markets=(), trades=(), detailed=True, catalog_expire_before=None):
         async with self.connection() as c:
             await self.fence(c, job)
             await self.insert_raw(c, raw)
             for m in markets:
+                # The hot catalog is an index, never a second copy of rule prose.
+                index = {k: v for k, v in m.items() if k not in ("rules", "tokens")}
                 await c.execute("""INSERT INTO surveillance_markets VALUES(%s,%s,%s,%s,%s,%s)
                     ON CONFLICT(venue,id) DO UPDATE SET document=EXCLUDED.document,
                     condition_id=EXCLUDED.condition_id,observed_at=EXCLUDED.observed_at,raw_id=EXCLUDED.raw_id""",
-                    (m["venue"], m["id"], m["condition_id"], Jsonb(m), m["observed_at"], raw["id"]))
-                await c.execute("""INSERT INTO surveillance_rules SELECT %s,%s,%s,%s,%s,%s
-                    WHERE (SELECT hash FROM surveillance_rules WHERE venue=%s AND market_id=%s
-                           ORDER BY observed_at DESC LIMIT 1) IS DISTINCT FROM %s ON CONFLICT DO NOTHING""",
-                    (m["venue"], m["condition_id"] or m["id"], m["rules_hash"], Jsonb(m), m["observed_at"], raw["id"],
-                     m["venue"], m["condition_id"] or m["id"], m["rules_hash"]))
+                    (m["venue"], m["id"], m["condition_id"], Jsonb(index), m["observed_at"], raw["id"]))
+                if detailed:
+                    # Only selected contracts/manual investigations get rule versions.
+                    rule_document = {k: m[k] for k in ("venue", "id", "title", "category", "tags", "rules", "observed_at")}
+                    await c.execute("""INSERT INTO surveillance_rules SELECT %s,%s,%s,%s,%s,%s
+                        WHERE (SELECT hash FROM surveillance_rules WHERE venue=%s AND market_id=%s
+                               ORDER BY observed_at DESC LIMIT 1) IS DISTINCT FROM %s ON CONFLICT DO NOTHING""",
+                        (m["venue"], m["condition_id"] or m["id"], m["rules_hash"], Jsonb(rule_document), m["observed_at"], raw["id"],
+                         m["venue"], m["condition_id"] or m["id"], m["rules_hash"]))
+            if catalog_expire_before is not None:
+                expired = await c.execute("""DELETE FROM surveillance_markets WHERE ctid IN (
+                    SELECT m.ctid FROM surveillance_markets m WHERE m.venue=%s AND m.observed_at<%s
+                    AND NOT EXISTS(SELECT 1 FROM surveillance_cases x WHERE x.venue=m.venue AND x.market_id=m.id)
+                    AND NOT EXISTS(SELECT 1 FROM surveillance_cases x WHERE x.venue=m.venue AND x.market_id=m.condition_id)
+                    AND NOT EXISTS(SELECT 1 FROM surveillance_jobs j WHERE j.venue=m.venue
+                        AND j.payload->>'manual'='true' AND j.payload->>'catalog_id'=m.id)
+                    LIMIT 50000)""", (job["venue"],catalog_expire_before))
+                checkpoint["expired_unseen_index_rows"] = expired.rowcount
+                checkpoint["expiry_meaning"] = "Absent from completed active walk; not proof of settlement; case/manual references retained"
             if trades:
                 async with c.cursor() as cursor:
                     await cursor.executemany("""INSERT INTO surveillance_trades VALUES(%s,%s,%s,%s,%s,%s,%s,%s)

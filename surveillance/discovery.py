@@ -18,8 +18,9 @@ def tier(m):
 
 class Selector:
     """Keep at most 2*budget documents while scanning any catalog size."""
-    def __init__(self, budget=100, exploration_fraction=0.2, at=None):
+    def __init__(self, budget=100, exploration_fraction=0.2, at=None, end_grace_hours=6):
         self.at = at or datetime.now(timezone.utc)
+        self.end_grace_hours = end_grace_hours
         self.budget = budget
         self.exploration = min(max(1, round(budget * exploration_fraction)), budget)
         self.deep, self.explore = [], []
@@ -30,7 +31,7 @@ class Selector:
         if m.get("end_time"):
             try:
                 hours = (datetime.fromisoformat(m["end_time"].replace("Z", "+00:00")) - self.at).total_seconds() / 3600
-                urgency = 1 / (1 + max(hours, 0))
+                urgency = 1 / (1 + hours) if hours >= 0 else 0
             except ValueError:
                 pass
         return (2 - tier(m)) * 10 + urgency + min(math.log1p(float(m["volume"])) / 100, 1)
@@ -43,8 +44,15 @@ class Selector:
                 pool.pop()
 
     def add(self, m):
-        if m["closed"] or (m["venue"] == "polymarket" and not m["condition_id"]):
+        if m["closed"] or m.get("settled") or m.get("is_combo") or not m.get("tradable", True) or (m["venue"] == "polymarket" and not m["condition_id"]):
             return
+        if m.get("end_time"):
+            try:
+                end = datetime.fromisoformat(m["end_time"].replace("Z", "+00:00"))
+                if end.tzinfo is None or (self.at - end).total_seconds() > self.end_grace_hours * 3600:
+                    return  # Not a settlement assertion: stale schedule metadata is ineligible for deep sampling.
+            except ValueError:
+                return
         self.keep(self.deep, (-self.rank(m), m["id"]), m, self.budget - self.exploration)
         # Keep budget random candidates so removing all deep picks still leaves enough.
         self.keep(self.explore, (digest([self.epoch, m["id"]]), m["id"]), m, self.budget)

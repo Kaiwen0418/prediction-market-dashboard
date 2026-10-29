@@ -304,3 +304,126 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(task.done())
             await c.execute("SELECT pg_advisory_unlock(%s)", (LOCK,))
             self.assertEqual((await asyncio.wait_for(task, 2))[0]["n"], 1)
+
+    async def test_light_catalog_details_and_restart_scope(self):
+        requests = []
+        def handler(request):
+            requests.append((request.url.path, dict(request.url.params)))
+            if request.url.path.endswith("/markets/p1"):
+                return httpx.Response(200, json={"id": "p1", "conditionId": "c1", "description": "rule prose",
+                    "question": "Policy announcement", "closed": False})
+            return httpx.Response(200, json={"markets": [{"id": "p1", "conditionId": "c1", "description": "rule prose",
+                "question": "Policy announcement", "closed": False}], "next_cursor": None})
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        worker = Worker(self.settings, Collector(self.store, self.archive, 0, client))
+        job = await self.job("catalog-test", "catalog")
+        job["payload"] = {"closed": False, "scope": "active-v2"}
+        await worker.ingest(job)
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_rules"))
+        doc = (await self.store.fetch("SELECT document FROM surveillance_markets"))[0]["document"]
+        self.assertNotIn("rules", doc)
+        self.assertNotIn("tokens", doc)
+        await self.store.release(job, 3600)
+        await worker.schedule("polymarket")
+        detail = await self.store.claim()
+        self.assertEqual(detail["kind"], "details")
+        await worker.ingest(detail)
+        rules = await self.store.fetch("SELECT document FROM surveillance_rules")
+        self.assertEqual(rules[0]["document"]["rules"]["description"], "rule prose")
+        self.assertEqual(requests[-1][0], "/markets/p1")
+        await self.store.enqueue("catalog:legacy", "catalog", "kalshi", {})
+        await worker.seed()
+        self.assertFalse((await self.store.fetch("SELECT enabled FROM surveillance_jobs WHERE id='catalog:legacy'"))[0]["enabled"])
+        active = await self.store.fetch("SELECT * FROM surveillance_jobs WHERE kind='catalog' AND enabled")
+        self.assertEqual({r["payload"]["scope"] for r in active}, {"active-v2"})
+        await worker.collector.close()
+
+    async def test_kalshi_discovery_excludes_combos_and_closed_but_details_allow_history(self):
+        def handler(request):
+            if request.url.path.endswith("/OLD"):
+                return httpx.Response(200, json={"market": {"ticker": "OLD", "event_ticker": "E", "status": "finalized", "result": "yes"}})
+            self.assertEqual(request.url.params["status"], "open")
+            self.assertEqual(request.url.params["mve_filter"], "exclude")
+            return httpx.Response(200, json={"markets": [], "cursor": ""})
+        worker = Worker(self.settings, Collector(self.store, self.archive,0,httpx.AsyncClient(transport=httpx.MockTransport(handler))))
+        job = await self.job("k", "catalog", "kalshi")
+        job["payload"] = {"scope": "active-v2"}
+        await worker.ingest(job)
+        raw, rows, _ = await worker.collector.page({"venue":"kalshi","kind":"details","checkpoint":{},"payload":{"market_id":"OLD"}})
+        self.assertEqual(rows[0]["status"], "finalized")
+        await worker.collector.close()
+
+    async def test_reset_only_owned_dataset_and_raw_dir(self):
+        from surveillance.maintenance import reset_test_dataset
+        async with self.store.connection() as c:
+            await c.execute("CREATE TABLE unrelated(note text)")
+            await c.execute("INSERT INTO unrelated VALUES('keep')")
+        raw = self.archive.write("kalshi", "test", {},200,b'{}')
+        await self.store.raw(raw)
+        await self.job()
+        await reset_test_dataset(self.store,self.folder.name)
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_raw"))
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_jobs"))
+        self.assertEqual((await self.store.fetch("SELECT note FROM unrelated"))[0]["note"],"keep")
+        self.assertFalse(Path(raw["path"]).exists())
+
+    async def test_manual_backfill_resolves_condition_and_stays_out_of_scheduler(self):
+        from argparse import Namespace
+        from unittest.mock import patch
+        from surveillance.cli import execute
+        def handler(request):
+            if request.url.path.endswith("/markets/past"):
+                return httpx.Response(200,json={"id":"past","conditionId":"old-condition","closed":True,
+                    "description":"historical rules","umaResolutionStatus":"resolved"})
+            self.assertEqual(request.url.params["condition"],"old-condition")
+            return httpx.Response(200,json={"data":[],"pagination":{"has_more":False,"next_cursor":None}})
+        with patch("surveillance.cli.Settings.env",return_value=self.settings):
+            await execute(Namespace(command="backfill",venue="polymarket",market="past",since="2025-01-01T00:00:00+00:00"))
+        worker=Worker(self.settings,Collector(self.store,self.archive,0,httpx.AsyncClient(transport=httpx.MockTransport(handler))))
+        self.assertTrue(await worker.run_once())
+        self.assertTrue(await worker.run_once())
+        jobs=await self.store.fetch("SELECT * FROM surveillance_jobs ORDER BY kind")
+        self.assertTrue(all(not j["enabled"] for j in jobs))
+        self.assertTrue(all(j["checkpoint"].get("completed_at") for j in jobs))
+        self.assertEqual(len(await self.store.fetch("SELECT * FROM surveillance_rules")),1)
+        await worker.schedule("polymarket")
+        self.assertFalse(any(j["enabled"] for j in await self.store.fetch("SELECT * FROM surveillance_jobs WHERE payload->>'manual'='true'")))
+        await worker.collector.close()
+
+    async def test_automatic_worker_suppresses_real_tiny_cash_anomaly(self):
+        cutoff=datetime.now(timezone.utc).replace(second=0,microsecond=0)
+        observed=(cutoff-timedelta(seconds=1)).isoformat()
+        job=await self.job()
+        raw=self.archive.write("polymarket","test",{},200,b'{}',observed)
+        rows=[]
+        for i in range(12):
+            r=dict(poly(),size=10,price=.001,timestamp=int((cutoff-timedelta(seconds=90+i*60)).timestamp()))
+            rows.append(dict(trade("polymarket",r,observed),id=f"base{i}"))
+        for i in range(10):
+            r=dict(poly(),size=1000,price=.001,timestamp=int((cutoff-timedelta(seconds=30-i)).timestamp()))
+            rows.append(dict(trade("polymarket",r,observed),id=f"spike{i}"))
+        await self.store.commit_page(job,raw,{},trades=rows)
+        await self.store.release(job,3600)
+        await self.store.enqueue("detect-test","detect","polymarket",{"market_id":"c1"})
+        worker=Worker(self.settings)
+        await worker.run_once()
+        checkpoint=(await self.store.fetch("SELECT checkpoint FROM surveillance_jobs WHERE id='detect-test'"))[0]["checkpoint"]
+        self.assertGreater(checkpoint["detected"],0)
+        self.assertGreater(checkpoint["suppressed_by_cost_floor"],0)
+        self.assertEqual(checkpoint["new_cases"],0)
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_cases"))
+        await worker.collector.close()
+
+    async def test_completed_active_walk_expires_unseen_index_but_keeps_manual_and_case(self):
+        old=(datetime.now(timezone.utc)-timedelta(days=1)).isoformat()
+        j=await self.job('seed','catalog')
+        raw=self.archive.write('polymarket','test',{},200,b'{}',old)
+        markets=[market('polymarket',{'id':k,'conditionId':k},old) for k in ('gone','manual','case')]
+        await self.store.commit_page(j,raw,{},markets=markets,detailed=False)
+        await self.store.enqueue('manual-ref','details','polymarket',{'manual':True,'catalog_id':'manual'})
+        await self.store.save_case({'id':'pinned','venue':'polymarket','market_id':'case'})
+        new=self.archive.write('polymarket','test',{},200,b'{"new":1}')
+        checkpoint={}
+        await self.store.commit_page(j,new,checkpoint,markets=[],detailed=False,catalog_expire_before=new['received_at'])
+        self.assertEqual({r['id'] for r in await self.store.fetch('SELECT id FROM surveillance_markets')},{'manual','case'})
+        self.assertEqual(checkpoint['expired_unseen_index_rows'],1)
