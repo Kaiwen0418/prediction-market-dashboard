@@ -206,3 +206,21 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
         raw=(await self.store.fetch('SELECT * FROM surveillance_raw'))[0]
         self.assertEqual(raw['response_headers']['age'],'123')
         await w.collector.close()
+
+    async def test_closed_details_recover_native_metadata_and_exit_eligibility(self):
+        requests=[]
+        def handler(req):
+            requests.append(dict(req.url.params))
+            if req.url.params.get('closed')!='true':return httpx.Response(200,json=[])
+            return httpx.Response(200,json=[dict(id='past',conditionId='old-condition',closed=True,
+                umaResolutionStatus='resolved',events=[{'id':'historic-event'}],description='closed rules')])
+        w=Worker(self.settings,Collector(self.store,self.archive,0,httpx.AsyncClient(transport=httpx.MockTransport(handler))))
+        j=await self.job('detail','details');j['payload']={'market_id':'old-condition','catalog_id':'past'}
+        await w.ingest(j)
+        row=(await self.store.fetch('SELECT document FROM surveillance_markets'))[0]['document']
+        self.assertEqual(row['event_ids'],['historic-event'])
+        self.assertTrue(row['settled'])
+        self.assertEqual(select([row],20),[])
+        self.assertEqual(len(requests),2)
+        self.assertEqual(len(await self.store.fetch('SELECT * FROM surveillance_raw')),2)
+        await w.collector.close()

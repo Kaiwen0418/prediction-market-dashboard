@@ -319,3 +319,9 @@ Selected response cache headers are retained with the raw receipt; coverage expo
 `wide_freshness` with actual head-event age, receipt age and cursor state. A 200 from
 an endpoint, or a completed historical walk, never establishes sub-minute discovery.
 No cache-busting parameters or header-based freshness guarantees are assumed.
+
+
+Exact-ID/condition metadata lookup explicitly retries `closed=true` when the default
+open listing is empty, then uses the individual ID endpoint if needed. This preserves
+historical investigations and recognizes selected contracts that have just closed;
+it never treats an empty open listing as proof that the contract does not exist.

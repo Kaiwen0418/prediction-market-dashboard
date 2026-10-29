@@ -322,7 +322,7 @@ class Worker:
             logger.warning("Job %s failed (%s)", job["id"], type(exc).__name__)
             await self.store.coverage(job["venue"], "error", {"error": reason, "checkpoint_preserved": True}, job["id"])
             backoff = min(3600, 60 * 2 ** min(job["failures"], 5))
-            if job['payload'].get('lookup') and job['failures']>=2:
+            if (job['payload'].get('lookup') or job['payload'].get('reason')=='restore omitted catalog metadata') and job['failures']>=2:
                 async with self.store.connection() as c:
                     await self.store.fence(c,job)
                     await c.execute('UPDATE surveillance_jobs SET enabled=false WHERE id=%s',(job['id'],))

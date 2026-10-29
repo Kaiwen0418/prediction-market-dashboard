@@ -91,8 +91,14 @@ class Collector:
             base = "https://gamma-api.polymarket.com/markets/" if venue == "polymarket" else "https://external-api.kalshi.com/trade-api/v2/markets/"
             # Gamma's filtered list includes events/tags omitted by /markets/{id}.
             if venue=='polymarket':
-                raw,body=await self.get(venue,'https://gamma-api.polymarket.com/markets',
-                    {'condition_ids' if payload.get('lookup') else 'id':key,'include_tag':'true'})
+                # The list defaults to open markets. Completed investigations and
+                # contracts that just closed need an explicit second lookup.
+                params={'condition_ids' if payload.get('lookup') else 'id':key,'include_tag':'true'}
+                raw,body=await self.get(venue,'https://gamma-api.polymarket.com/markets',params)
+                if body==[]:
+                    raw,body=await self.get(venue,'https://gamma-api.polymarket.com/markets',dict(params,closed='true'))
+                if body==[] and not payload.get('lookup'):
+                    raw,body=await self.get(venue,base+quote(key,safe=''),{})
             else:
                 raw, body = await self.get(venue, base + quote(key, safe=""), {})
             rows, _ = unpack(venue, kind, body)
