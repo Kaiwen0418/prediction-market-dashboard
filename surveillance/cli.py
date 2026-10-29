@@ -42,6 +42,31 @@ async def execute(args):
                 ON CONFLICT DO NOTHING""", (key,args.venue,Jsonb(payload),Jsonb({"since":since})))
         print(json.dumps({"detail_job": detail, "trade_job": key,
                           "historical_received_at": "actual collection time; never backdated"}))
+    elif args.command == 'review-event':
+        from .event_review import enqueue_review
+        rows = await store.fetch('SELECT venue,document FROM surveillance_information WHERE id=%s', (args.information,))
+        if not rows or not rows[0]['document'].get('publication_time_verified'):
+            raise ValueError('Verified information record required')
+        async with store.connection() as c:
+            key = await enqueue_review(c,args.information,rows[0]['venue'],datetime.now(timezone.utc).isoformat(),args.contract_only)
+        print(json.dumps({'job_id': key}))
+    elif args.command == 'aggregate-market':
+        from datetime import timedelta
+        start,end = (datetime.fromisoformat(timestamp(v)) for v in (args.start,args.end))
+        if not start<end or end-start>timedelta(days=7):
+            raise ValueError('Select at most seven days')
+        async with store.connection() as c:
+            rows = await (await c.execute("""SELECT DISTINCT venue,market_id,
+                COALESCE(NULLIF(document->>'token_id',''),outcome) AS outcome,
+                to_timestamp((floor(extract(epoch FROM event_time)/300)+1)*300) AS bin_end
+                FROM surveillance_trades WHERE venue=%s AND market_id=%s AND event_time>=%s AND event_time<%s
+                LIMIT 20001""", (args.venue,args.market,start,end))).fetchall()
+            if len(rows)>20000:
+                raise ValueError('Aggregate rebuild exceeds 20000 bins; shorten interval')
+            async with c.cursor() as cursor:
+                await cursor.executemany('INSERT INTO surveillance_dirty_bins VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING',
+                    [(r['venue'],r['market_id'],r['outcome'],r['bin_end']) for r in rows])
+        print(json.dumps({'dirty_bins':len(rows),'known_at':'actual worker materialization; never backdated'}))
     elif args.command == "coverage":
         print(json.dumps(await completeness(store), default=str, indent=2))
     elif args.command == "replay":
@@ -75,6 +100,14 @@ def main():
     backfill.add_argument("--venue", choices=("polymarket", "kalshi"), required=True)
     backfill.add_argument("--market", required=True, help="Polymarket numeric catalog ID or Kalshi ticker")
     backfill.add_argument("--since", required=True, help="Timezone-aware lower boundary; market cursor walk may be long")
+    rebuild = commands.add_parser('aggregate-market')
+    rebuild.add_argument('--venue',choices=('polymarket','kalshi'),required=True)
+    rebuild.add_argument('--market',required=True)
+    rebuild.add_argument('--start',required=True)
+    rebuild.add_argument('--end',required=True)
+    event = commands.add_parser('review-event')
+    event.add_argument('--information',required=True)
+    event.add_argument('--contract-only',action='store_true')
     worker = commands.add_parser("worker")
     worker.add_argument("--once", action="store_true")
     replay_parser = commands.add_parser("replay")

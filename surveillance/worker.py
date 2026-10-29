@@ -23,6 +23,7 @@ class Worker:
         self.collector = collector or Collector(self.store, RawArchive(settings.raw_dir), settings.request_interval)
 
     async def seed(self):
+        await self.store.enqueue("aggregates", "aggregates", "system", {})
         await self.store.enqueue("maintenance", "maintenance", "system", {})
         catalog_ids = []
         for venue in ("polymarket", "kalshi"):
@@ -68,7 +69,7 @@ class Worker:
                 WHERE venue=%s AND kind IN ('details','trades','detect') AND NOT COALESCE((payload->>'manual')::boolean,false)""", (keys, keys, venue))
         await self.store.coverage(venue, "budget", {"catalog_rows": count, "selected_contracts": len(chosen),
             "budget": self.settings.contracts_per_venue, "exploration_fraction": self.settings.exploration_fraction,
-            "limitations": ["Heuristic category ranking; no verified event mapping yet",
+            "limitations": ["Heuristic category ranking; only native within-platform event grouping available",
                              "REST only; order books and broadcast feeds not collected",
                              "Automatic catalog: active contracts only; MVE combinations excluded",
                              "Closed contracts are available through explicit detail/backfill jobs",
@@ -108,6 +109,11 @@ class Worker:
                 await self.store.commit_page(job, raw, cp, markets=markets, detailed=job["kind"] == "details",
                                              catalog_expire_before=expire_before)
             else:
+                cp.setdefault('legacy_walk', bool(cp.get('cursor')) and not cp.get('walk_upper'))
+                cp.setdefault('walk_upper', raw['received_at'])
+                cp.setdefault('walk_lower', datetime.fromtimestamp(cp['since'], timezone.utc).isoformat())
+                cp['walk_pages'] = cp.get('walk_pages', 0) + 1
+                cp['walk_raw_ids'] = (cp.get('walk_raw_ids', []) + [raw['id']])[:64]
                 normalized = [trade(job["venue"], r, raw["received_at"]) for r in rows]
                 previous = cp.get("last_time")
                 counts = Counter(cp.get("counts", {}))
@@ -130,10 +136,16 @@ class Worker:
                     accepted.append(t)
                     high_watermark = max(high_watermark, ts)
                 cp.update(cursor=cursor, high_watermark=high_watermark, last_time=previous, counts=dict(counts))
+                cp['walk_trades'] = cp.get('walk_trades',0)+len(accepted)
+                completed_walk = None
                 if exhausted or not cursor:
+                    completed_walk = dict(lower_time=cp['walk_lower'], upper_time=cp['walk_upper'],
+                        raw_ids=cp['walk_raw_ids'], refs_complete=cp['walk_pages']<=64,observed_trades=cp['walk_trades'])
+                    if cp.get('legacy_walk'):
+                        completed_walk = None
                     cp = {"since": max(cp["since"], high_watermark - 300), "completed_at": raw["received_at"]}
                     cursor = None
-                await self.store.commit_page(job, raw, cp, trades=accepted)
+                await self.store.commit_page(job, raw, cp, trades=accepted, completed_walk=completed_walk)
             if not cursor:
                 await self.store.coverage(job["venue"], "walk_completed", {"kind": job["kind"],
                     "market_id": job["payload"].get("market_id"), "checkpoint": cp,
@@ -154,7 +166,36 @@ class Worker:
         if not job:
             return False
         try:
-            if job["kind"] == "maintenance":
+            if job['kind'] == 'aggregates':
+                from .aggregates import materialize
+                if not job['checkpoint'].get('bootstrapped'):
+                    async with self.store.connection() as c:
+                        await c.execute("""INSERT INTO surveillance_dirty_bins
+                            SELECT DISTINCT venue,market_id,COALESCE(NULLIF(document->>'token_id',''),outcome),
+                                to_timestamp((floor(extract(epoch FROM event_time)/300)+1)*300)
+                            FROM surveillance_trades WHERE event_time>=now()-interval '7 days'
+                            ON CONFLICT DO NOTHING""")
+                await self.store.checkpoint(job, dict(await materialize(self.store),bootstrapped=True))
+                delay = 30
+            elif job['kind'] == 'event_review':
+                from .event_review import build_review
+                try:
+                    result = await build_review(self.store, job['payload']['information_id'], job['payload']['as_of'],job['payload'].get('contract_only',False))
+                    checkpoint = {'case_id': result['id'], 'completed_at': datetime.now(timezone.utc).isoformat()}
+                except ValueError as exc:
+                    # Invalid/expired inputs and explicit work caps require a new request,
+                    # rather than unbounded retries of the same immutable cutoff.
+                    checkpoint = {'review_unavailable': str(exc), 'completed_at': datetime.now(timezone.utc).isoformat()}
+                    await self.store.coverage(job['venue'],'event_review_unavailable',checkpoint,job['id'])
+                await self.store.checkpoint(job, checkpoint)
+                async with self.store.connection() as c:
+                    await self.store.fence(c, job)
+                    await c.execute('UPDATE surveillance_jobs SET enabled=false WHERE id=%s', (job['id'],))
+                delay = 3600
+            elif job['kind'] == 'wallet':
+                from .wallets import collect_profile
+                delay = await collect_profile(self, job)
+            elif job["kind"] == "maintenance":
                 result = await prune(self.store, self.settings.retention_days)
                 await self.store.checkpoint(job, result)
                 delay = 3600
@@ -168,7 +209,11 @@ class Worker:
                 new_cases = 0
                 eligible_cases = [case for case in cases if automatic_candidate(case["signal"], self.settings.automatic_min_cash_usd)]
                 for case in eligible_cases:
-                    new_cases += int(await self.store.save_candidate(case, self.settings.case_cooldown_seconds))
+                    created = await self.store.save_candidate(case, self.settings.case_cooldown_seconds)
+                    new_cases += int(created)
+                    if created:
+                        from .wallets import admit_profile
+                        await admit_profile(self.store, case)
                 await self.store.checkpoint(job, {"as_of": as_of, "detected": len(cases),
                     "new_cases": new_cases, "coalesced": len(eligible_cases) - new_cases,
                     "suppressed_by_cost_floor": len(cases) - len(eligible_cases),

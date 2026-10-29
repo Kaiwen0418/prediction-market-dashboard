@@ -149,7 +149,7 @@ workers can claim disjoint jobs, but rate limiting is process-local; do not scal
 workers without a shared rate budget. No WebSocket authentication is configured.
 Reports expose REST sampling and unavailable order-book coverage explicitly.
 
-Schema initialization is idempotent for version 1; future incompatible changes need
+Schema initialization is idempotent through version 2; future incompatible changes need
 an explicit versioned migration. Use a dedicated database, not the dashboard database.
 The single worker performs bounded hourly retention: cases/coverage/paused jobs expire
 at 7 days, trades/unreferenced raw at 8 days, with retained-case inputs and current
@@ -188,3 +188,64 @@ Interface references verified on 2026-10-28:
 - [Polymarket trade feed](https://docs.polymarket.com/api-reference/feeds/list-trades)
 - [Polymarket keyset catalog](https://docs.polymarket.com/api-reference/markets/list-markets-keyset-pagination)
 - [Kalshi public trades](https://docs.kalshi.com/api-reference/market/get-trades)
+
+## Event review and wallet self-history (schema 2)
+
+Verified manual information (`publication_time_verified=true`, `published_at`,
+`verification_note`) now queues a post-disclosure review. This does **not** activate
+an automatic news feed or change real-time detection scores. Query the job through
+`GET /coverage`, then fetch its `case_id` via the existing case/report endpoints.
+An invalid/expired input or a work cap completes the job with `review_unavailable`;
+there is no partial score and no endless retry of an immutable review cutoff.
+
+Reviews use 1h/6h/1d/3d/7d windows before the publication anchor, with exact boundary
+fragments. Contract/outcome totals remain separate. One native event ID groups known
+siblings into a versioned case, keyed by venue/event/publication time. This is neither
+cross-platform equivalence nor a proof that related contracts settle identically.
+At most 20 contracts / 20,000 aggregate bins / 50,000 boundary fills / 4,096 evidence
+receipts are admitted per review. Excess is explicit. For larger families use
+`POST /event-reviews/{information_id}?contract_only=true` or CLI `--contract-only`.
+
+`POST /event-reviews/{information_id}` refreshes after a backfill or aggregation
+finishes, using a fresh actual knowledge cutoff. A completed report can contain
+`pending_aggregation` or `unknown_or_expired`; sparse/missing bins are never zero-filled.
+`sampled_no_trades` requires retained, fully referenced, zero-fill API walks covering
+all full bins; it describes REST observations, never guaranteed upstream completeness.
+The publication anchor must be verified independently and need not be the earliest
+public disclosure. Uncalibrated review scores are `null`.
+
+Five-minute trade bins are sparse and versioned by actual materialization time. Late
+fills append a correction without rewriting past versions. The global worker job
+processes at most 500 dirty bins per claim every 30 seconds. Bootstrapping indexes the
+retained seven-day trade window once; historical investigations can explicitly queue
+older retained source rows:
+
+```sh
+python -m surveillance.cli aggregate-market --venue polymarket --market CONDITION_ID --start '2026-01-01T00:00:00Z' --end '2026-01-08T00:00:00Z'
+python -m surveillance.cli review-event --information INFORMATION_ID --contract-only
+```
+
+`GET /aggregates?venue=…&market_id=…&start=…&end=…&as_of=…` reads the latest version
+known at that cutoff (maximum seven-day range; explicit result cap). `known_at` is
+when the worker computed the bucket, not exchange event time or first receipt time.
+
+New Polymarket automatic cases may queue one public-wallet enrichment, ranked by
+observed anomaly-window cash. Admission is limited to four wallets per hour globally,
+and each walk to two pages / 1,000 fills from seven days before the alert window until
+the alert cutoff, with actual later receipt times. Kalshi never gets wallet profiles.
+`GET /wallet-profiles?case_id=…` returns the queued/completed/truncated state. A within-wallet
+cash ratio requires a complete requested walk, at least 20 baseline fills across two
+observed dates, and current-window fills. Insufficient/truncated history returns
+`null`, not zero. Gross contract concentration is descriptive; no net position,
+profit, account creation time, person identity or wallet clustering is inferred.
+Profiles append a case version while preserving its original scores and human review.
+
+Aggregates, walk receipts and wallet profiles share the seven-day retention and
+existing 20 GiB database / 5 GiB raw admission budgets. FIFO eviction removes derived
+rows referencing expired receipts; copied case inputs retain their raw pins until
+case expiry or capacity eviction. These are admission budgets, not filesystem quotas.
+CUSUM/EWMA, statistical threshold calibration, automatic public-information feeds,
+and cross-platform rule equivalence remain outside this implementation.
+
+Run `python -m surveillance.research.benchmark_review` inside the API container for
+a disposable isolated-schema benchmark of the actual SQL/materialization/review path.

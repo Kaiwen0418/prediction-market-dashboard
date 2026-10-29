@@ -12,7 +12,10 @@ async def completeness(store):
     recent = await store.fetch("SELECT * FROM surveillance_coverage ORDER BY id DESC LIMIT 200")
     raw = await store.fetch("SELECT venue,count(*) AS responses,max(received_at) AS latest_response FROM surveillance_raw GROUP BY venue")
     rules = await store.fetch("SELECT venue,count(*) AS versions,count(DISTINCT market_id) AS detailed_contracts FROM surveillance_rules GROUP BY venue")
-    return dict(catalog=counts, detailed_rules=rules, jobs=jobs, recent_coverage=recent, raw=raw,
+    aggregate_state = await store.fetch('SELECT count(*) AS versions,max(known_at) AS latest_known_at FROM surveillance_aggregates')
+    pending_bins = await store.fetch('SELECT count(*) AS n FROM surveillance_dirty_bins')
+    profiles = await store.fetch("SELECT document->>'status' AS status,count(*) AS n FROM surveillance_wallet_profiles GROUP BY document->>'status'")
+    return dict(aggregates=aggregate_state[0],pending_aggregate_bins=pending_bins[0]['n'],wallet_profiles=profiles,catalog=counts, detailed_rules=rules, jobs=jobs, recent_coverage=recent, raw=raw,
         accuracy="REST sampled; exact executable-depth history unavailable",
         limitations=["Active non-combination discovery across topics; closed/history and MVE combinations require explicit backfill",
                      "Catalog is a lightweight index; rule details exist only for selected/manual contracts",

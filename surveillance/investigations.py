@@ -56,6 +56,7 @@ async def replay(store, venue, market_id, as_of, persist=True, max_trades=50000)
                 for wallet, activity in sorted(wallets.items()):
                     wallet_observations.append(dict(wallet=wallet, trade_count=len(activity),
                         volume_shares=sum(float(t["quantity"]) for t in activity),
+                        cash_usd=sum(float(t["quantity"])*float(t["price"]) for t in activity),
                         earliest_in_anomaly_window=min(t["event_time"] for t in activity),
                         scope="Observed anomaly window only; not wallet creation or full history"))
             document = dict(id=digest([VERSION, venue, market_id, outcome_key, signal["window_seconds"], cutoff.isoformat()]),

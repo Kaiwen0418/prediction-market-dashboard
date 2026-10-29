@@ -1,0 +1,197 @@
+{
+  "kind": "synthetic implementation benchmark",
+  "fills": 50000,
+  "span_days": 7,
+  "aggregate_versions": 2001,
+  "aggregate_passes": 6,
+  "intake_seconds": 0.8763850689865649,
+  "aggregate_seconds": 1.333282308652997,
+  "review_seconds": 0.2600483330897987,
+  "relation_bytes": [
+    {
+      "relname": "surveillance_aggregates",
+      "bytes": 1138688
+    },
+    {
+      "relname": "surveillance_capacity",
+      "bytes": 16384
+    },
+    {
+      "relname": "surveillance_case_versions",
+      "bytes": 49152
+    },
+    {
+      "relname": "surveillance_cases",
+      "bytes": 65536
+    },
+    {
+      "relname": "surveillance_coverage",
+      "bytes": 16384
+    },
+    {
+      "relname": "surveillance_dirty_bins",
+      "bytes": 344064
+    },
+    {
+      "relname": "surveillance_information",
+      "bytes": 49152
+    },
+    {
+      "relname": "surveillance_jobs",
+      "bytes": 16384
+    },
+    {
+      "relname": "surveillance_markets",
+      "bytes": 40960
+    },
+    {
+      "relname": "surveillance_raw",
+      "bytes": 65536
+    },
+    {
+      "relname": "surveillance_rules",
+      "bytes": 32768
+    },
+    {
+      "relname": "surveillance_schema",
+      "bytes": 24576
+    },
+    {
+      "relname": "surveillance_trades",
+      "bytes": 19816448
+    },
+    {
+      "relname": "surveillance_walks",
+      "bytes": 147456
+    },
+    {
+      "relname": "surveillance_wallet_profiles",
+      "bytes": 40960
+    }
+  ],
+  "peak_rss_kib": 93324,
+  "review_windows": [
+    {
+      "seconds": 3600,
+      "start": "2026-10-29T09:00:37.123456+00:00",
+      "end": "2026-10-29T10:00:37.123456+00:00",
+      "outcomes": [
+        {
+          "outcome": "token-yes",
+          "fills": null,
+          "cash": null,
+          "buy_cash": null,
+          "sell_cash": null,
+          "sampled_trade_bins": 0,
+          "refs_complete": true
+        }
+      ],
+      "fully_sampled_api_bins": 11,
+      "empty_api_bins": 0,
+      "expected_full_bins": 11,
+      "boundary_seconds": 300,
+      "boundary_empty_sample": false,
+      "pending_aggregation": false,
+      "observation": "unknown_or_expired"
+    },
+    {
+      "seconds": 21600,
+      "start": "2026-10-29T04:00:37.123456+00:00",
+      "end": "2026-10-29T10:00:37.123456+00:00",
+      "outcomes": [
+        {
+          "outcome": "token-yes",
+          "fills": 1400,
+          "cash": "7000.0",
+          "buy_cash": "7000.0",
+          "sell_cash": "0",
+          "sampled_trade_bins": 56,
+          "refs_complete": true
+        }
+      ],
+      "fully_sampled_api_bins": 71,
+      "empty_api_bins": 0,
+      "expected_full_bins": 71,
+      "boundary_seconds": 300,
+      "boundary_empty_sample": false,
+      "pending_aggregation": false,
+      "observation": "observed_sample"
+    },
+    {
+      "seconds": 86400,
+      "start": "2026-10-28T10:00:37.123456+00:00",
+      "end": "2026-10-29T10:00:37.123456+00:00",
+      "outcomes": [
+        {
+          "outcome": "token-yes",
+          "fills": 6800,
+          "cash": "34000.0",
+          "buy_cash": "34000.0",
+          "sell_cash": "0",
+          "sampled_trade_bins": 272,
+          "refs_complete": true
+        }
+      ],
+      "fully_sampled_api_bins": 287,
+      "empty_api_bins": 0,
+      "expected_full_bins": 287,
+      "boundary_seconds": 300,
+      "boundary_empty_sample": false,
+      "pending_aggregation": false,
+      "observation": "observed_sample"
+    },
+    {
+      "seconds": 259200,
+      "start": "2026-10-26T10:00:37.123456+00:00",
+      "end": "2026-10-29T10:00:37.123456+00:00",
+      "outcomes": [
+        {
+          "outcome": "token-yes",
+          "fills": 21200,
+          "cash": "106000.0",
+          "buy_cash": "106000.0",
+          "sell_cash": "0",
+          "sampled_trade_bins": 848,
+          "refs_complete": true
+        }
+      ],
+      "fully_sampled_api_bins": 863,
+      "empty_api_bins": 0,
+      "expected_full_bins": 863,
+      "boundary_seconds": 300,
+      "boundary_empty_sample": false,
+      "pending_aggregation": false,
+      "observation": "observed_sample"
+    },
+    {
+      "seconds": 604800,
+      "start": "2026-10-22T10:00:37.123456+00:00",
+      "end": "2026-10-29T10:00:37.123456+00:00",
+      "outcomes": [
+        {
+          "outcome": "token-yes",
+          "fills": 50000,
+          "cash": "250000.0",
+          "buy_cash": "250000.0",
+          "sell_cash": "0",
+          "sampled_trade_bins": 2000,
+          "refs_complete": true
+        }
+      ],
+      "fully_sampled_api_bins": 2015,
+      "empty_api_bins": 0,
+      "expected_full_bins": 2015,
+      "boundary_seconds": 300,
+      "boundary_empty_sample": false,
+      "pending_aggregation": false,
+      "observation": "observed_sample"
+    }
+  ],
+  "generated_at": "2026-10-29T11:29:18.677981+00:00",
+  "caveats": [
+    "One synthetic contract / one outcome; not a whole-platform throughput estimate",
+    "API container limited to 1 CPU / 512 MiB; PostgreSQL shared with live test services",
+    "Source tables, JSON payloads, indexes, raw receipts and cases measured separately",
+    "No new realtime classification accuracy inferred"
+  ]
+}

@@ -16,6 +16,13 @@ async def prune(store, days=7, limit=50000):
         ids = [r["id"] for r in expired]
         await c.execute("DELETE FROM surveillance_case_versions WHERE case_id=ANY(%s)", (ids,))
         await c.execute("DELETE FROM surveillance_cases WHERE id=ANY(%s)", (ids,))
+        # Derived summaries are disposable under the same seven-day/capacity policy.
+        for table in ('surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles'):
+            from psycopg import sql
+            await c.execute(sql.SQL('DELETE FROM {} WHERE ctid IN (SELECT ctid FROM {} WHERE {}<%s LIMIT %s)').format(
+                sql.Identifier(table),sql.Identifier(table),sql.Identifier('admitted_at' if table=='surveillance_wallet_profiles' else 'known_at')), (cutoff,limit))
+        await c.execute('DELETE FROM surveillance_wallet_profiles WHERE NOT EXISTS(SELECT 1 FROM surveillance_cases c WHERE c.id=case_id)')
+        await c.execute('DELETE FROM surveillance_dirty_bins WHERE bin_end<%s', (evidence_cutoff,))
         trades = await c.execute("""DELETE FROM surveillance_trades WHERE ctid IN (
             SELECT t.ctid FROM surveillance_trades t WHERE event_time<%s AND received_at<%s
             AND NOT EXISTS(SELECT 1 FROM surveillance_cases c WHERE c.venue=t.venue AND c.market_id=t.market_id
@@ -24,7 +31,7 @@ async def prune(store, days=7, limit=50000):
         coverage = await c.execute("""DELETE FROM surveillance_coverage WHERE id IN (
             SELECT id FROM surveillance_coverage WHERE observed_at<%s LIMIT %s)""", (cutoff, limit))
         jobs = await c.execute("""DELETE FROM surveillance_jobs WHERE id IN (
-            SELECT id FROM surveillance_jobs WHERE NOT enabled AND kind IN ('details','trades','detect','backfill')
+            SELECT id FROM surveillance_jobs WHERE NOT enabled AND kind IN ('details','trades','detect','backfill','event_review','wallet')
             AND updated_at<%s AND (lease_until IS NULL OR lease_until<now()) LIMIT %s)""", (cutoff, limit))
         # A current rule snapshot and any case-pinned rule evidence survive expiry.
         rules = await c.execute("""DELETE FROM surveillance_rules r WHERE r.ctid IN (
@@ -36,7 +43,10 @@ async def prune(store, days=7, limit=50000):
             AND NOT EXISTS (SELECT 1 FROM surveillance_cases c WHERE c.document->>'rules_raw_id'=old.raw_id)
             LIMIT %s)""", (evidence_cutoff, limit))
         deleted = await (await c.execute("""WITH refs AS (
-            SELECT raw_id AS id FROM surveillance_markets UNION SELECT raw_id FROM surveillance_rules
+            SELECT unnest(raw_ids) AS id FROM surveillance_aggregates
+            UNION SELECT unnest(raw_ids) FROM surveillance_walks
+            UNION SELECT unnest(raw_ids) FROM surveillance_wallet_profiles
+            UNION SELECT raw_id FROM surveillance_markets UNION SELECT raw_id FROM surveillance_rules
             UNION SELECT raw_id FROM surveillance_trades UNION SELECT raw_id FROM surveillance_information
             UNION SELECT document->>'rules_raw_id' FROM surveillance_cases
             UNION SELECT jsonb_array_elements_text(COALESCE(document->'replay_raw_ids','[]')) FROM surveillance_cases

@@ -124,7 +124,7 @@ class Store:
             await self.fence(c, job)
             await c.execute("UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s", (Jsonb(checkpoint), job["id"]))
 
-    async def commit_page(self, job, raw, checkpoint, markets=(), trades=(), detailed=True, catalog_expire_before=None):
+    async def commit_page(self, job, raw, checkpoint, markets=(), trades=(), detailed=True, catalog_expire_before=None, completed_walk=None):
         async with self.connection() as c:
             await self.fence(c, job)
             await self.insert_raw(c, raw)
@@ -158,6 +158,12 @@ class Store:
                     await cursor.executemany("""INSERT INTO surveillance_trades VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT DO NOTHING""", [(t["venue"], t["id"], t["market_id"], t["outcome"], t["event_time"],
                                                    t["received_at"], Jsonb(t), raw["id"]) for t in trades])
+            if trades:
+                from .aggregates import dirty
+                await dirty(c, trades)
+            if completed_walk:
+                from .aggregates import record_walk
+                await record_walk(c, job, completed_walk)
             await c.execute("""UPDATE surveillance_jobs SET checkpoint=%s,lease_until=now()+interval '5 minutes',
                             updated_at=now() WHERE id=%s""", (Jsonb(checkpoint), job["id"]))
 
@@ -221,3 +227,23 @@ class Store:
             await c.execute("""INSERT INTO surveillance_case_versions(case_id,version,document)
                 VALUES(%s,1,%s) ON CONFLICT DO NOTHING""", (document["id"], Jsonb(document)))
             return True
+
+    async def update_dossier(self, document):
+        """Version enrichment without resetting the human review state or original alert."""
+        async with self.connection() as c:
+            await c.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (document['id'],))
+            row = await (await c.execute("SELECT * FROM surveillance_cases WHERE id=%s FOR UPDATE", (document['id'],))).fetchone()
+            if row:
+                document = dict(document, status=row['status'])
+                if 'review' in row['document']:
+                    document['review'] = row['document']['review']
+                if document == row['document']:
+                    return document
+                await c.execute("UPDATE surveillance_cases SET document=%s WHERE id=%s", (Jsonb(document),document['id']))
+            else:
+                await c.execute("INSERT INTO surveillance_cases(id,venue,market_id,status,document) VALUES(%s,%s,%s,%s,%s)",
+                    (document['id'],document['venue'],document['market_id'],document.get('status','candidate'),Jsonb(document)))
+            await c.execute("""INSERT INTO surveillance_case_versions(case_id,version,document)
+                SELECT %s,COALESCE(max(version),0)+1,%s FROM surveillance_case_versions WHERE case_id=%s""",
+                (document['id'],Jsonb(document),document['id']))
+            return document
