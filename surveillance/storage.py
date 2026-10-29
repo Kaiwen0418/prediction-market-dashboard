@@ -59,8 +59,10 @@ class Store:
         self.dsn = dsn
 
     @asynccontextmanager
-    async def connection(self):
+    async def connection(self, exclusive=False):
         async with await psycopg.AsyncConnection.connect(self.dsn, row_factory=dict_row) as connection:
+            await connection.execute("SELECT pg_advisory_lock(81724003)" if exclusive else
+                                     "SELECT pg_advisory_xact_lock_shared(81724003)")
             yield connection
 
     async def initialize(self):

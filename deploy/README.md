@@ -112,3 +112,30 @@ docker compose --env-file deploy/.env -f deploy/local.compose.yml run --rm --no-
 Each benchmark creates and removes only its random schema and scratch archive.
 The HTTP benchmark script is `deploy/benchmark-http.py`; execute with httpx installed
 against `/health` and `/api/polymarket/market-context`. Measurements are warm and short.
+
+### Automatic capacity overwrite
+
+The disposable surveillance dataset has a **20 GiB PostgreSQL admission budget**
+and a **5 GiB raw archive budget**, configurable with
+`SURVEILLANCE_DATABASE_MAX_BYTES` / `SURVEILLANCE_RAW_MAX_BYTES` in `deploy/.env`.
+The worker checks at startup and at most every 60 seconds between jobs/pages.
+At 80% of either budget it pauses collection and evicts the oldest response
+receipts in batches of 10,000, removing dependent catalog/rule/trade/information
+records and entire cases whose evidence expires. Capacity eviction overrides
+manual evidence and case pins; export anything worth keeping separately.
+Discovery cursors survive, so discovery advances rather than restarting.
+
+Each batch also removes orphan raw files and runs `VACUUM FULL` on the affected
+surveillance tables to return file space to the OS. The target is below 60% of
+**both** budgets; at most eight batches run per check. If still above 80%,
+collection stays paused and retries after 60 seconds. Investigation write APIs
+return 503 with Retry-After while above the watermark. `/capacity` (bearer auth)
+reports usage, budgets and the last eviction. `/coverage` records an eviction gap;
+retained catalogs are a rolling subset, not a complete historical inventory.
+
+An exclusive advisory lock serializes collection/API transactions with deletion,
+file removal and compaction. Investigation API calls may wait during compaction;
+the separate dashboard backend continues normally. Use one collection worker.
+These are application admission budgets, **not filesystem hard quotas**: an
+in-flight page/API call, PostgreSQL WAL, Docker images/logs and VACUUM scratch
+space are additional. Keep at least 20 GiB free on the host for maintenance.

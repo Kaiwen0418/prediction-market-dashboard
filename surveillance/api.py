@@ -2,12 +2,13 @@ from contextlib import asynccontextmanager
 import hmac
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field, HttpUrl
 from psycopg.types.json import Jsonb
 
 from .cases import completeness, report
+from .capacity import usage, pressured
 from .config import Settings
 from .investigations import replay, ReplayCapacityError
 from .normalization import canonical, digest, now, timestamp
@@ -47,13 +48,24 @@ def create_app(settings=None):
         await store.initialize()
         yield
 
-    async def authorized(authorization: str = Header(default="")):
+    async def authorized(request: Request, authorization: str = Header(default="")):
         if not settings.api_token:
             raise HTTPException(503, "Configure SURVEILLANCE_API_TOKEN")
         if not hmac.compare_digest(authorization, "Bearer " + settings.api_token):
             raise HTTPException(401, "Bearer token required")
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and pressured(await usage(store, settings), settings):
+            raise HTTPException(503, "Capacity watermark reached; automatic eviction pending", headers={"Retry-After": "60"})
 
     app = FastAPI(title="Market Surveillance", lifespan=lifespan, dependencies=[Depends(authorized)])
+
+    @app.get("/capacity")
+    async def capacity_status():
+        measured = await usage(store, settings)
+        previous = await store.fetch("SELECT updated_at,document FROM surveillance_capacity WHERE id=1")
+        return {**measured, "database_max_bytes": settings.database_max_bytes, "raw_max_bytes": settings.raw_max_bytes,
+                "evict_at_ratio": .8, "target_ratio": .6, "admission_blocked": pressured(measured, settings),
+                "last_eviction": previous[0] if previous else None,
+                "limits": "Admission budgets; excludes WAL, images, logs and compaction scratch; not a filesystem quota"}
 
     @app.get("/health")
     async def health():
@@ -121,9 +133,9 @@ def create_app(settings=None):
         key = digest(record)
         record.update(id=key, received_at=now(), first_seen_at=now(),
                       intake="manual evidence; URL/content not independently fetched or verified")
-        raw = RawArchive(settings.raw_dir).write(body.venue, str(body.source_url), {"intake": "manual"}, 0,
-                                               canonical(record).encode(), record["received_at"])
         async with store.connection() as c:
+            raw = RawArchive(settings.raw_dir).write(body.venue, str(body.source_url), {"intake": "manual"}, 0,
+                                                   canonical(record).encode(), record["received_at"])
             await store.insert_raw(c, raw)
             await c.execute("INSERT INTO surveillance_information(id,venue,market_id,document,raw_id) VALUES(%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                             (key, body.venue, body.market_id, Jsonb(record), raw["id"]))
@@ -141,11 +153,11 @@ def create_app(settings=None):
 
     @app.get("/evidence/{raw_id}")
     async def evidence(raw_id: str):
-        rows = await store.fetch("SELECT * FROM surveillance_raw WHERE id=%s", (raw_id,))
-        if not rows:
-            raise HTTPException(404, "Evidence not found")
-        r = rows[0]
-        content = RawArchive.read(r)
+        async with store.connection() as c:
+            r = await (await c.execute("SELECT * FROM surveillance_raw WHERE id=%s", (raw_id,))).fetchone()
+            if not r:
+                raise HTTPException(404, "Evidence not found")
+            content = RawArchive.read(r)
         return {"id": raw_id, "sha256": r["sha256"], "source": r["source"], "params": r["params"],
                 "received_at": r["received_at"], "status": r["status"], "body": content.decode("utf-8", errors="replace")}
 

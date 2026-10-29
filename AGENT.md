@@ -37,7 +37,8 @@ Required GitHub secrets for Vercel deploy workflows:
 The backend test deployment runs on `frodo@192.168.1.131` using `deploy/local.compose.yml`;
 update it with `deploy/update-local.sh`. The public API is `https://predict-test.project-echo.xyz`.
 Railway is offline and its GitHub source is disconnected. Frontend hosting stays on Vercel.
-For the current surveillance/migration task, keep PR #15 draft and unmerged until the user requests integration.
+The user authorized integration of PR #15 after adding automatic database capacity overwrite.
+Surveillance capacity eviction may discard test data, including case-pinned evidence.
 
 ## Local Environment
 

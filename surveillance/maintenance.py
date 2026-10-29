@@ -9,7 +9,7 @@ async def prune(store, days=7, limit=50000):
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     # Keep an extra day of baseline inputs for every retained case.
     evidence_cutoff = cutoff - timedelta(days=1)
-    async with store.connection() as c:
+    async with store.connection(exclusive=True) as c:
         await c.execute("SELECT pg_advisory_xact_lock(81724002)")
         expired = await (await c.execute("SELECT id FROM surveillance_cases WHERE created_at<%s LIMIT %s",
                                         (cutoff, limit))).fetchall()
@@ -51,9 +51,11 @@ async def prune(store, days=7, limit=50000):
         result = dict(expired_cases=len(ids), expired_trades=trades.rowcount, expired_coverage=coverage.rowcount,
                       expired_rule_versions=rules.rowcount, expired_paused_jobs=jobs.rowcount, expired_raw_receipts=len(deleted), removed_blobs=0,
                       retention_days=days, baseline_cushion_days=1)
-    # The worker serializes collection and maintenance; do not run competing writers.
-    for path in paths:
-        if path not in keep:
-            Path(path).unlink(missing_ok=True)
-            result["removed_blobs"] += 1
+        # Commit references before unlink; the session lock remains held until close.
+        await c.commit()
+        # Keep the exclusive evidence lock through filesystem removal as well.
+        for path in paths:
+            if path not in keep:
+                Path(path).unlink(missing_ok=True)
+                result["removed_blobs"] += 1
     return result

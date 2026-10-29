@@ -12,6 +12,7 @@ async def completeness(store):
         accuracy="REST sampled; exact executable-depth history unavailable",
         limitations=["No whole-platform coverage percentage: upstream denominator unknown",
                      "News and sports feeds require configured sources; manual evidence intake available",
+                     "Capacity eviction expires oldest receipts and dependent cases; catalog is a rolling subset",
                      "Raw archive integrity can be checked with CLI verify; this report is not an integrity proof"])
 
 

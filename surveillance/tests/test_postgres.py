@@ -1,6 +1,7 @@
 """Run with SURVEILLANCE_TEST_DATABASE_URL; every test owns its own SQL schema."""
 import asyncio
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -35,7 +36,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         await self.store.initialize()
         self.folder = tempfile.TemporaryDirectory()
         self.archive = RawArchive(self.folder.name)
-        self.settings = Settings(self.dsn, Path(self.folder.name), request_interval=0, pages_per_job=1)
+        self.settings = Settings(self.dsn, Path(self.folder.name), request_interval=0, pages_per_job=1, database_max_bytes=1024**4)
 
     async def asyncTearDown(self):
         async with await psycopg.AsyncConnection.connect(self.base) as c:
@@ -139,7 +140,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cases[0]["rules"]["rules_primary"], "old rules")
         self.assertEqual(cases, await replay(self.store, "kalshi", "c1", cutoff.isoformat()))
         self.assertEqual(len(await self.store.fetch("SELECT * FROM surveillance_cases")), len(cases))
-        settings = Settings(self.dsn, Path(self.folder.name), api_token="test-token")
+        settings = replace(self.settings, api_token="test-token")
         app = create_app(settings)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             self.assertEqual((await client.get("/health")).status_code, 401)
@@ -174,7 +175,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
                      "outcomes": '["A","B","C"]', "clobTokenIds": '["1","2","3"]'} for i in range(4)]
             return httpx.Response(200, json={"markets": rows})
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        settings = Settings(self.dsn, Path(self.folder.name), contracts_per_venue=2, pages_per_job=1)
+        settings = replace(self.settings, contracts_per_venue=2, pages_per_job=1)
         worker = Worker(settings, Collector(self.store, self.archive, 0, client))
         for closed in (False, True):
             await self.store.enqueue(f"catalog:{closed}", "catalog", "polymarket", {"closed": closed})
@@ -238,3 +239,68 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ReplayCapacityError):
             await replay(self.store,"kalshi","c1",cutoff.isoformat(),max_trades=5)
         self.assertEqual(await self.store.fetch("SELECT * FROM surveillance_cases"),[])
+
+    async def test_capacity_fifo_preserves_newer_shared_blob_and_progress(self):
+        from surveillance.capacity import evict_batch, sweep_orphans, TABLES
+        from psycopg import sql
+        old = self.archive.write("polymarket", "old", {}, 200, b"shared", "2020-01-01T00:00:00+00:00")
+        new = self.archive.write("polymarket", "new", {}, 200, b"shared")
+        await self.store.raw(old)
+        await self.store.raw(new)
+        job = await self.job(kind="catalog")
+        await self.store.checkpoint(job, {"cursor": "keep-progress"})
+        m = market("polymarket", {"id": "m1", "conditionId": "c1"}, old["received_at"])
+        await self.store.commit_page(job, old, {"cursor": "keep-progress"}, markets=[m])
+        # A later case refers to the oldest receipt, so capacity eviction must
+        # remove both versions and the case despite its newer creation time.
+        await self.store.save_case({"id": "pinned", "venue": "polymarket", "market_id": "c1",
+                                    "rules_raw_id": old["id"]})
+        before = (await self.store.fetch("SELECT pg_total_relation_size('surveillance_markets') AS n"))[0]["n"]
+        async with await psycopg.AsyncConnection.connect(self.dsn, autocommit=True,
+                                                         row_factory=psycopg.rows.dict_row) as c:
+            self.assertEqual(await evict_batch(c, 1), 1)
+            self.assertEqual(await sweep_orphans(c, self.folder.name), 0)
+            for table in TABLES:
+                await c.execute(sql.SQL("VACUUM (FULL, ANALYZE) {}").format(sql.Identifier(table)))
+        self.assertTrue(Path(new["path"]).exists())
+        self.assertEqual(RawArchive.read(new), b"shared")
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_cases"))
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_case_versions"))
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_markets"))
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_rules"))
+        self.assertEqual((await self.store.fetch("SELECT checkpoint FROM surveillance_jobs"))[0]["checkpoint"]["cursor"],
+                         "keep-progress")
+        after = (await self.store.fetch("SELECT pg_total_relation_size('surveillance_markets') AS n"))[0]["n"]
+        self.assertLess(after, before)
+
+    async def test_capacity_trigger_blocks_api_then_evicts_oldest_and_recovers(self):
+        from dataclasses import replace
+        from surveillance.capacity import enforce, raw_bytes
+        old = self.archive.write("polymarket", "old", {}, 200, os.urandom(65536), "2020-01-01T00:00:00+00:00")
+        new = self.archive.write("polymarket", "new", {}, 200, os.urandom(65536))
+        await self.store.raw(old)
+        await self.store.raw(new)
+        settings = replace(self.settings, raw_max_bytes=raw_bytes(self.folder.name), api_token="capacity-test")
+        app = create_app(settings)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test",
+                                     headers={"Authorization": "Bearer capacity-test"}) as client:
+            response = await client.post("/replay", json={"venue": "polymarket", "market_id": "c1", "as_of": now()})
+            self.assertEqual(response.status_code, 503)
+            result = await enforce(self.store, settings, batch_limit=1, max_batches=1)
+            self.assertEqual(result["evicted_receipts"], 1)
+            self.assertFalse(result["blocked"])
+            self.assertFalse(Path(old["path"]).exists())
+            self.assertTrue(Path(new["path"]).exists())
+            self.assertEqual((await client.get("/capacity")).status_code, 200)
+            response = await client.post("/replay", json={"venue": "polymarket", "market_id": "c1", "as_of": now()})
+            self.assertEqual(response.status_code, 200)
+
+    async def test_capacity_exclusive_lock_serializes_other_transactions(self):
+        from surveillance.capacity import LOCK
+        async with await psycopg.AsyncConnection.connect(self.dsn, autocommit=True) as c:
+            await c.execute("SELECT pg_advisory_lock(%s)", (LOCK,))
+            task = asyncio.create_task(self.store.fetch("SELECT 1 AS n"))
+            await asyncio.sleep(.05)
+            self.assertFalse(task.done())
+            await c.execute("SELECT pg_advisory_unlock(%s)", (LOCK,))
+            self.assertEqual((await asyncio.wait_for(task, 2))[0]["n"], 1)

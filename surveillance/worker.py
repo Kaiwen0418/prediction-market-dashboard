@@ -7,6 +7,7 @@ from .collectors import Collector, ContractError
 from .discovery import Selector
 from .investigations import replay, ReplayCapacityError
 from .maintenance import prune
+from .capacity import CapacityGuard
 from .normalization import market, trade, digest
 from .storage import Store, RawArchive
 
@@ -17,6 +18,7 @@ class Worker:
     def __init__(self, settings, collector=None):
         self.settings = settings
         self.store = Store(settings.database_url)
+        self.capacity = CapacityGuard(self.store, settings)
         self.collector = collector or Collector(self.store, RawArchive(settings.raw_dir), settings.request_interval)
 
     async def seed(self):
@@ -64,6 +66,8 @@ class Worker:
             await self.store.coverage(job["venue"], "bootstrap_horizon", {"market_id": job["payload"]["market_id"],
                 "since": cp["since"], "older_history": "not_collected"}, job["id"])
         for _ in range(self.settings.pages_per_job):
+            if not await self.capacity.check():
+                return 60
             job["checkpoint"] = cp
             raw, rows, cursor = await self.collector.page(job)
             cursor_hash = digest(cursor) if cursor else None
@@ -116,6 +120,8 @@ class Worker:
         return 1
 
     async def run_once(self):
+        if not await self.capacity.check():
+            return False
         job = await self.store.claim()
         if not job:
             return False

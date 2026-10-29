@@ -52,3 +52,13 @@ CREATE INDEX IF NOT EXISTS surveillance_raw_path ON surveillance_raw(path);
 CREATE INDEX IF NOT EXISTS surveillance_raw_received ON surveillance_raw(received_at);
 
 CREATE INDEX IF NOT EXISTS surveillance_markets_open ON surveillance_markets(venue,id) WHERE document->>'closed'='false';
+
+CREATE TABLE IF NOT EXISTS surveillance_capacity (
+ id integer PRIMARY KEY CHECK(id=1), updated_at timestamptz NOT NULL DEFAULT now(), document jsonb NOT NULL
+);
+
+-- FIFO receipt eviction checks these foreign keys for every deleted receipt.
+CREATE INDEX IF NOT EXISTS surveillance_rules_raw ON surveillance_rules(raw_id);
+CREATE INDEX IF NOT EXISTS surveillance_markets_raw ON surveillance_markets(raw_id);
+CREATE INDEX IF NOT EXISTS surveillance_trades_raw ON surveillance_trades(raw_id);
+CREATE INDEX IF NOT EXISTS surveillance_information_raw ON surveillance_information(raw_id);
