@@ -3,6 +3,7 @@ import asyncio
 from email.utils import parsedate_to_datetime
 import json
 import time
+from urllib.parse import quote
 
 import httpx
 
@@ -22,6 +23,11 @@ class UpstreamCooldown(ContractError):
 def unpack(venue, kind, body):
     if not isinstance(body, dict):
         raise ContractError("Expected response envelope")
+    if kind == "details":
+        row = body if venue == "polymarket" else body.get("market")
+        if not isinstance(row, dict) or not row.get("id" if venue == "polymarket" else "ticker"):
+            raise ContractError("Missing market detail")
+        return [row], None
     if kind == "catalog":
         rows = body.get("markets")
         cursor = body.get("next_cursor") if venue == "polymarket" else body.get("cursor")
@@ -79,6 +85,15 @@ class Collector:
     async def page(self, job):
         venue, kind, cp, payload = job["venue"], job["kind"], job["checkpoint"], job["payload"]
         params = {"limit": 100 if kind == "catalog" else 1000}
+        if kind == "details":
+            key = str(payload.get("catalog_id") or payload["market_id"])
+            base = "https://gamma-api.polymarket.com/markets/" if venue == "polymarket" else "https://external-api.kalshi.com/trade-api/v2/markets/"
+            raw, body = await self.get(venue, base + quote(key, safe=""), {})
+            rows, _ = unpack(venue, kind, body)
+            actual = str(rows[0]["id" if venue == "polymarket" else "ticker"])
+            if actual != key:
+                raise ContractError("Detail response belongs to another contract")
+            return raw, rows, None
         if venue == "polymarket":
             if kind == "catalog":
                 url = "https://gamma-api.polymarket.com/markets/keyset"
@@ -90,7 +105,9 @@ class Collector:
                 cursor_key = "cursor"
         else:
             url = "https://external-api.kalshi.com/trade-api/v2/markets"
-            if kind == "trades":
+            if kind == "catalog" and payload.get("scope") == "active-v2":
+                params.update(status="open", mve_filter="exclude")
+            if kind in ("trades", "backfill"):
                 url += "/trades"
                 params["ticker"] = payload["market_id"]
                 # Pin min_ts for the entire cursor walk. Replay the boundary second.

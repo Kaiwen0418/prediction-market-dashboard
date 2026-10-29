@@ -1,0 +1,273 @@
+{
+  "method": "Event-time retrospective probes at first alert, not current wallet history",
+  "results": [
+    {
+      "case": "maduro-reported",
+      "at_cutoff": "2026-01-02T14:17:00+00:00",
+      "wallet": "0x6d7776a0f954be1a7c975a1e8244de6268f7b72c",
+      "selection": "Largest observed taker cash flow on dominant side of first automatic-floor alert",
+      "window_wallet_cash": 1139.0994,
+      "rows": 5000,
+      "api_walk_complete": false,
+      "distinct_markets": 49,
+      "distinct_events": 24,
+      "earliest_indexed_trade_in_retrieved_history": "2025-12-09T06:40:27+00:00",
+      "visible_history_span_hours": 583.6091666666666,
+      "largest_event_share_of_observed_gross_cash": 0.21262174511221915,
+      "events": {
+        "maduro-out-in-2025": 92845.08367839518,
+        "fed-decision-in-january": 1262049.349673696,
+        "who-will-die-in-stranger-things-season-5": 348219.97680201306,
+        "who-will-trump-nominate-as-fed-chair": 58664.14938398185,
+        "lighter-market-cap-fdv-one-day-after-launch": 204309.14540988352,
+        "what-day-will-the-lighter-airdrop-be": 25053.127151186054,
+        "largest-company-end-of-2025": 214476.58078823393,
+        "next-leader-out-of-power-in-2025": 1516.918870188046,
+        "battle-of-the-sexes-aryna-sabalenka-vs-nick-kyrgios": 159789.934274575,
+        "what-price-will-bitcoin-hit-in-2025": 350466.41644025507,
+        "weed-rescheduled-in-2025": 122252.68730271624,
+        "epstein-blackmail-files-released-in-2025": 134323.3476600612,
+        "fed-rate-cut-by-629": 401.59169999710696,
+        "highest-grossing-movie-in-2025": 40370.030249949996,
+        "will-trump-release-the-epstein-files-by": 41103.356809418125,
+        "how-many-fed-rate-cuts-in-2026": 1851.0257910515188,
+        "boxing-jake-paul-vs-anthony-joshua-third-option-included": 608643.7644560895,
+        "boxing-jake-paul-vs-anthony-joshua": 58647.71469968194,
+        "will-trump-release-epstein-files-by": 814434.725810093,
+        "avatar-fire-and-ash-opening-weekend-box-office": 304.4183330128833,
+        "hyperliquid-hype-hits-100-this-year": 239154.54733960843,
+        "russia-x-ukraine-ceasefire-in-2025": 21838.30729107284,
+        "fed-decision-in-december": 961717.3152607539,
+        "trump-declassifies-ufo-files-in-2025": 173221.6032956303
+      },
+      "receipts": [
+        {
+          "path": "page-00.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x6d7776a0f954be1a7c975a1e8244de6268f7b72c&start=1&end=1767363420&taker_only=false&limit=1000",
+          "sha256": "bf725aea53b3a9b06fc44e6620ee748c55b2f92761a799c54efffdfaea1a9a70",
+          "received_at": "2026-10-29T10:00:59.091945+00:00"
+        },
+        {
+          "path": "page-01.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x6d7776a0f954be1a7c975a1e8244de6268f7b72c&start=1&end=1767363420&taker_only=false&limit=1000&cursor=eyJkYXRhIjp7InR5cGUiOiJ0cmFkZXMiLCJwYXJhbXMiOnsibCI6MTAwMCwidHMiOjE3NjY4MjkxODUsInNxIjoiODA4NTQ5NzEwMDE0MjEyNDExIiwiZCI6MTAwMH19LCJzaWciOiJkYzUzZTNlYzAwZGMzYzUyZDcxMzk2YzRjMDA2NGMxMyJ9",
+          "sha256": "684dc93e1bc53e4b404ee220114ae64212a095e0a6a0fa85355a9c5f4b8613e5",
+          "received_at": "2026-10-29T10:01:00.088333+00:00"
+        },
+        {
+          "path": "page-02.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x6d7776a0f954be1a7c975a1e8244de6268f7b72c&start=1&end=1767363420&taker_only=false&limit=1000&cursor=eyJkYXRhIjp7InR5cGUiOiJ0cmFkZXMiLCJwYXJhbXMiOnsibCI6MTAwMCwidHMiOjE3NjYxODIxMzMsInNxIjoiODA1MzE1MDQwMDA1MjA1NjgxIiwiZCI6MjAwMH19LCJzaWciOiJhNWU0M2YyZmEwYjM1ODg3YTE1OWFmMmZlNjFlZWU0YiJ9",
+          "sha256": "ee4a5ac5d8f9076325654175e5bd25b2349cd42247b4280d76690881e838540e",
+          "received_at": "2026-10-29T10:01:01.046142+00:00"
+        },
+        {
+          "path": "page-03.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x6d7776a0f954be1a7c975a1e8244de6268f7b72c&start=1&end=1767363420&taker_only=false&limit=1000&cursor=eyJkYXRhIjp7InR5cGUiOiJ0cmFkZXMiLCJwYXJhbXMiOnsibCI6MTAwMCwidHMiOjE3NjU5OTM0MTIsInNxIjoiODA0Mzk1OTcwMDA1OTA1MzAxIiwiZCI6MzAwMH19LCJzaWciOiI4OWRiNTkwMDg1OTg5ZTJhNjM4OTRmYmJhNzcwM2M4NiJ9",
+          "sha256": "78d645b266c29f0725c501f496088bb8a1119c9be4a9de7be92fb594d9afdf71",
+          "received_at": "2026-10-29T10:01:02.113164+00:00"
+        },
+        {
+          "path": "page-04.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x6d7776a0f954be1a7c975a1e8244de6268f7b72c&start=1&end=1767363420&taker_only=false&limit=1000&cursor=eyJkYXRhIjp7InR5cGUiOiJ0cmFkZXMiLCJwYXJhbXMiOnsibCI6MTAwMCwidHMiOjE3NjUzMzE1NjYsInNxIjoiODAxMTMyMzIwMDA2NTA2MDMxIiwiZCI6NDAwMH19LCJzaWciOiI3Njk0OGY2YzRlZWI5NTVlNTYzN2RjYzc0M2RlZTdlOSJ9",
+          "sha256": "9a34225d91dba504ac4793dd2b38213ede6b8a5def07d1d494150b22dabf05ea",
+          "received_at": "2026-10-29T10:01:03.277059+00:00"
+        }
+      ],
+      "limitations": [
+        "Retrospective receipt time; historical delivery unknown",
+        "Five-page cap; concentration is conditional on retrieved history if incomplete",
+        "Indexed first trade is not account creation or identity proof",
+        "Cash turnover is not position, profit or coordinated-wallet attribution"
+      ]
+    },
+    {
+      "case": "nobel-machado-reported",
+      "at_cutoff": "2025-10-09T22:55:00+00:00",
+      "wallet": "0xa430506774f9efaf39903ee7e0db1351f66891ca",
+      "selection": "Largest observed taker cash flow on dominant side of first automatic-floor alert",
+      "window_wallet_cash": 2641.6178392990782,
+      "rows": 15,
+      "api_walk_complete": true,
+      "distinct_markets": 2,
+      "distinct_events": 1,
+      "earliest_indexed_trade_in_retrieved_history": "2025-10-09T22:42:57+00:00",
+      "visible_history_span_hours": 0.20083333333333334,
+      "largest_event_share_of_observed_gross_cash": 1.0000000000000002,
+      "events": {
+        "nobel-peace-prize-winner-2025": 4837.912042298679
+      },
+      "receipts": [
+        {
+          "path": "page-00.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0xa430506774f9efaf39903ee7e0db1351f66891ca&start=1&end=1760050500&taker_only=false&limit=1000",
+          "sha256": "4047f1ae72d3c7a8d2f1907eeb539e788dcc7925b9f62fd9904fcb95d4035a20",
+          "received_at": "2026-10-29T10:01:04.165561+00:00"
+        }
+      ],
+      "limitations": [
+        "Retrospective receipt time; historical delivery unknown",
+        "Five-page cap; concentration is conditional on retrieved history if incomplete",
+        "Indexed first trade is not account creation or identity proof",
+        "Cash turnover is not position, profit or coordinated-wallet attribution"
+      ]
+    },
+    {
+      "case": "nobel-navalnaya-peer",
+      "at_cutoff": "2025-10-09T23:38:00+00:00",
+      "wallet": "0x5ecde7348ea5100af4360dd7a6e0a3fb1d420787",
+      "selection": "Largest observed taker cash flow on dominant side of first automatic-floor alert",
+      "window_wallet_cash": 703.1518002,
+      "rows": 5000,
+      "api_walk_complete": false,
+      "distinct_markets": 207,
+      "distinct_events": 74,
+      "earliest_indexed_trade_in_retrieved_history": "2025-10-04T10:46:00+00:00",
+      "visible_history_span_hours": 132.86666666666667,
+      "largest_event_share_of_observed_gross_cash": 0.2295264967185599,
+      "events": {
+        "nobel-peace-prize-winner-2025": 43764.13458097179,
+        "richest-person-on-october-31": 56.378288000000005,
+        "nba-mvp-694": 703.7833839832484,
+        "least-streamed-song-on-the-life-of-a-showgirl-by-oct-10th": 3130.2467440062924,
+        "which-company-has-top-ai-model-end-of-october-style-control-on": 47.99325999999997,
+        "of-views-of-the-fate-of-ophelia-by-friday": 1.56508,
+        "will-a-new-country-join-the-abraham-accords-in-2025": 922.0,
+        "zohran-mamdani-of-vote-in-2025-nyc-mayoral-election-216": 119.53999999999999,
+        "lisa-cook-out-as-fed-governor-by-september-30": 4362.499519000001,
+        "who-will-trump-nominate-as-fed-chair": 39.864999999999995,
+        "how-many-gold-cards-will-trump-sell-in-2025": 37.40244699064291,
+        "how-many-democratic-wins-in-november": 2.2074,
+        "which-company-has-best-ai-model-end-of-october": 535.7439,
+        "will-kmx-beat-earnings-estimate-2025-09-25-1pt03": 512.4185940007839,
+        "next-french-prime-minister-469": 1915.7268049991048,
+        "world-series-champion-2025": 14554.631047014373,
+        "nobel-peace-prize-2025": 37733.03283897614,
+        "1-free-app-in-the-us-apple-app-store-on-october-10": 1417.462916036223,
+        "levi-quarterly-earnings-nongaap-eps-2025-10-09-0pt30": 7.2016,
+        "elon-musk-trillionaire-in-2025": 75.00278999774001,
+        "when-will-the-government-shutdown-end": 18014.607810022797,
+        "how-many-fed-rate-cuts-in-2025": 989.9360869988174,
+        "2nd-largest-company-end-of-october-731": 65.979478162105,
+        "fed-decisions-in-2025": 276.8421259994478,
+        "nobel-prize-in-literature-2025": 6800.134191932255,
+        "will-the-us-invade-afghanistan-in-2025": 1199.7671980014368,
+        "the-life-of-a-showgirl-first-week-album-sales-121": 8548.51025284883,
+        "fact-check-was-tyler-robinson-a-lone-actor": 2903.5642599891,
+        "oscars-2026-best-supporting-actress-winner": 75.47,
+        "when-will-israel-announce-ceasefire": 236.1025350010028,
+        "how-many-spacex-launches-in-2025": 216.31000000000003,
+        "richest-person-on-december-31": 9.335411999999998,
+        "milei-out-as-president-of-argentina-in-2025": 186.10000000000002,
+        "will-ctas-beat-earnings-estimate-2025-09-24-1pt18": 2764.4175,
+        "will-cash-beat-earnings-estimate-2025-09-19-1pt29": 425.0,
+        "will-eric-adams-be-removed-as-nyc-mayor": 672.90357,
+        "what-will-trump-say-during-president-of-finland-events-on-october-9": 74.998713,
+        "largest-company-end-of-october-716": 4.2626100000000005,
+        "oscars-2026-best-actor-winner": 1.8394,
+        "will-usdt-market-cap-hit-by-december-31": 222.23396699944408,
+        "who-will-be-mentioned-in-epstein-survivors-list": 17.1,
+        "which-song-taylor-swifts-the-life-of-a-showgirl-will-be-lowest-rank-on-the-billboard-hot-100-for-the-week-of-october-18": 449.154348002352,
+        "taylor-swift-holds-top-ten-spots-on-the-billboard-hot-100-for-the-week-of-october-18th": 2453.4489359786394,
+        "obama-federally-charged-in-2025": 1309.6084999999998,
+        "which-song-taylor-swifts-the-life-of-a-showgirl-will-be-highest-rank-on-the-billboard-hot-100-for-the-week-of-october-18": 63.82930600000005,
+        "will-gta-6-cost-100": 4456.91201,
+        "which-party-wins-3nd-most-seats-in-netherlands-election": 8.15394,
+        "what-will-lebron-announce-tuesday": 5857.610053000958,
+        "what-will-trump-say-during-carney-events-on-october-7": 2101.5784390006706,
+        "largest-democratic-margin-of-victory": 111.09,
+        "oscars-2026-best-director-winner": 8.82,
+        "pepe-etf-in-2025": 1890.2780000000002,
+        "virginia-governor-election-winner-2025": 3240.40343998395,
+        "super-bowl-champion-2026-731": 2925.6337329855533,
+        "will-the-next-government-funding-bill-be-a-clean-cr": 659.9945640005882,
+        "big-brother-uk-series-22-winner": 1586.9580630098578,
+        "bolivia-presidential-election": 5.93902,
+        "who-will-acquire-tiktok-559": 954.0,
+        "apld-quarterly-earnings-nongaap-eps-2025-10-09-neg0pt16": 56.86839999047999,
+        "will-house-and-senate-pass-funding-bill-by": 1360.0,
+        "which-candidates-will-advance-to-brazils-presidential-runoff": 372.0,
+        "will-china-unban-bitcoin-in-2025": 71.50005700032429,
+        "democratic-presidential-nominee-2028": 928.7674820002926,
+        "the-official-release-party-of-a-showgirl-opening-weekend-box-office": 4.93036,
+        "f1-singapore-grand-prix-which-constructor-scores-1st": 9.8,
+        "nfl-offensive-rookie-of-the-year-267": 0.37588,
+        "how-many-executive-orders-will-trump-sign-by-october-10": 30.4900000021,
+        "which-country-will-join-abraham-accords-in-2025": 400.5696,
+        "who-will-trump-announce-as-next-fed-chair": 4596.200000000001,
+        "will-bitcoin-activate-op-ctv-or-op-cat-in-2025": 55.60296,
+        "texas-strategic-bitcoin-reserve-act-signed-in-2025": 182.7103759957059,
+        "will-curtis-sliwa-drop-out-458": 564.4143,
+        "which-party-wins-4nd-most-seats-in-netherlands-election": 210.48999999999998,
+        "sperm-racing-champion-october-4th": 99.0
+      },
+      "receipts": [
+        {
+          "path": "page-00.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x5ecde7348ea5100af4360dd7a6e0a3fb1d420787&start=1&end=1760053080&taker_only=false&limit=1000",
+          "sha256": "6f3c13b97ddc4c6845a22d621a951a2f11009e5d7c7d83e6e90f6d3c1c7a3da9",
+          "received_at": "2026-10-29T10:01:04.727712+00:00"
+        },
+        {
+          "path": "page-01.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x5ecde7348ea5100af4360dd7a6e0a3fb1d420787&start=1&end=1760053080&taker_only=false&limit=1000&cursor=eyJkYXRhIjp7InR5cGUiOiJ0cmFkZXMiLCJwYXJhbXMiOnsibCI6MTAwMCwidHMiOjE3NTk5NjU3ODksInNxIjoiNzc0MzA2NzIwMDA4MjExMDAxIiwiZCI6MTAwMH19LCJzaWciOiJlNWQzNjJiM2Q1OTc2N2E4MDFhNjc5YzA2ZTdlMmE4MyJ9",
+          "sha256": "668d1234d04fede8d90a791e2ed08d1a453cbdc9673b60ba5b86658da3349d8e",
+          "received_at": "2026-10-29T10:01:06.189501+00:00"
+        },
+        {
+          "path": "page-02.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x5ecde7348ea5100af4360dd7a6e0a3fb1d420787&start=1&end=1760053080&taker_only=false&limit=1000&cursor=eyJkYXRhIjp7InR5cGUiOiJ0cmFkZXMiLCJwYXJhbXMiOnsibCI6MTAwMCwidHMiOjE3NTk5NjM5NDMsInNxIjoiNzc0Mjk3NTgwMDA4NzE1MDcxIiwiZCI6MjAwMH19LCJzaWciOiI2NWE1NTQwNTg2YTg4ZmU2ZDBiM2MzY2Q4MmY4Nzc4ZSJ9",
+          "sha256": "6391e9865cd317ba2306170e4b9724e25d95d6f6299b61bbf18e62c4a674819f",
+          "received_at": "2026-10-29T10:01:07.402384+00:00"
+        },
+        {
+          "path": "page-03.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x5ecde7348ea5100af4360dd7a6e0a3fb1d420787&start=1&end=1760053080&taker_only=false&limit=1000&cursor=eyJkYXRhIjp7InR5cGUiOiJ0cmFkZXMiLCJwYXJhbXMiOnsibCI6MTAwMCwidHMiOjE3NTk5MDE1MzAsInNxIjoiNzczOTk2NjkwMDA3NzA1MTQxIiwiZCI6MzAwMH19LCJzaWciOiJjYmViYjZhZmIwNWIyZjRhNDc3NGFlZDQ1NmNhNzUwNSJ9",
+          "sha256": "fc59b2747976dfd3fabb1b9921d90fa0949f4ccc48901f0ff2b78944304fa9d2",
+          "received_at": "2026-10-29T10:01:08.588739+00:00"
+        },
+        {
+          "path": "page-04.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x5ecde7348ea5100af4360dd7a6e0a3fb1d420787&start=1&end=1760053080&taker_only=false&limit=1000&cursor=eyJkYXRhIjp7InR5cGUiOiJ0cmFkZXMiLCJwYXJhbXMiOnsibCI6MTAwMCwidHMiOjE3NTk3MzI3MzUsInNxIjoiNzczMjAzOTcwMDA0MjAzMTYxIiwiZCI6NDAwMH19LCJzaWciOiIxM2YyYWNkNmEyZjQxZDY4ZjU4ZDRiZGUyYjMyZTZjYSJ9",
+          "sha256": "b3fcd4fdab9f879728721eed3babb6721f24ce03f7dfa6fb3983004049bed2ef",
+          "received_at": "2026-10-29T10:01:09.844056+00:00"
+        }
+      ],
+      "limitations": [
+        "Retrospective receipt time; historical delivery unknown",
+        "Five-page cap; concentration is conditional on retrieved history if incomplete",
+        "Indexed first trade is not account creation or identity proof",
+        "Cash turnover is not position, profit or coordinated-wallet attribution"
+      ]
+    },
+    {
+      "case": "nobel-sudan-peer",
+      "at_cutoff": "2025-10-09T18:00:00+00:00",
+      "wallet": "0x8c874f868c0510342814eac5fc9ef4bdcb90704a",
+      "selection": "Largest observed taker cash flow on dominant side of first automatic-floor alert",
+      "window_wallet_cash": 9778.859997995607,
+      "rows": 1,
+      "api_walk_complete": true,
+      "distinct_markets": 1,
+      "distinct_events": 1,
+      "earliest_indexed_trade_in_retrieved_history": "2025-10-09T17:08:27+00:00",
+      "visible_history_span_hours": 0.8591666666666666,
+      "largest_event_share_of_observed_gross_cash": 1.0,
+      "events": {
+        "nobel-peace-prize-winner-2025": 9778.859997995607
+      },
+      "receipts": [
+        {
+          "path": "page-00.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x8c874f868c0510342814eac5fc9ef4bdcb90704a&start=1&end=1760032800&taker_only=false&limit=1000",
+          "sha256": "3244aa3325e815e739fde3c536b14079423738594a7bbda371755ce9e757b727",
+          "received_at": "2026-10-29T10:01:10.698255+00:00"
+        }
+      ],
+      "limitations": [
+        "Retrospective receipt time; historical delivery unknown",
+        "Five-page cap; concentration is conditional on retrieved history if incomplete",
+        "Indexed first trade is not account creation or identity proof",
+        "Cash turnover is not position, profit or coordinated-wallet attribution"
+      ]
+    }
+  ]
+}

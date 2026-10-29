@@ -118,3 +118,34 @@ class CoreTests(unittest.TestCase):
             self.assertNotEqual(first["id"], second["id"])
             self.assertNotEqual(first["received_at"], second["received_at"])
             self.assertEqual(len(list(Path(folder).rglob("*.parquet"))), 1)
+
+    def test_lifecycle_and_stale_schedule_do_not_enter_deep_pool(self):
+        base = {"id": "p", "conditionId": "c", "question": "Policy announcement", "closed": False,
+                "active": True, "acceptingOrders": True}
+        live = market("polymarket", base, T.isoformat())
+        fixtures = [live,
+            market("polymarket", dict(base, id="resolved", umaResolutionStatus="resolved"), T.isoformat()),
+            market("polymarket", dict(base, id="pending", umaResolutionStatus="proposed"), T.isoformat()),
+            market("polymarket", dict(base, id="paused", acceptingOrders=False), T.isoformat()),
+            market("polymarket", dict(base, id="stale", endDate=(T-timedelta(days=30)).isoformat()), T.isoformat()),
+            market("kalshi", {"ticker": "KXMVE1", "event_ticker": "e", "status": "active"}, T.isoformat()),
+            market("kalshi", {"ticker": "new", "event_ticker": "e", "status": "initialized"}, T.isoformat())]
+        self.assertEqual([m["id"] for m in select(fixtures,20,.2,T)], ["p"])
+        self.assertFalse(fixtures[4]["settled"])  # Expired schedule is not a settlement assertion.
+
+    def test_cash_floor_does_not_confuse_shares_with_money_or_filter_sell_signals(self):
+        from surveillance.detectors import automatic_candidate
+        rows = [dict(trade("polymarket", dict(poly(), size=10000, price=.0001), T.isoformat()),id="penny")]
+        signal = evaluate(rows,T.isoformat())[0]
+        self.assertEqual(signal["cash_notional_usd"],1)
+        self.assertFalse(automatic_candidate(signal))
+        self.assertTrue(automatic_candidate(dict(signal,cash_notional_usd=15000,trade_count=1)))
+        self.assertTrue(automatic_candidate(dict(signal,cash_notional_usd=1000,trade_count=5,signed_imbalance=-1)))
+        self.assertIsNone(evaluate([dict(trade("kalshi",kalshi(),T.isoformat()),id="anonymous")],T.isoformat())[0]["largest_public_wallet_buy_share"])
+
+    def test_polymarket_combo_eligibility_does_not_hide_individual_markets(self):
+        m=market('polymarket',{'id':'sport','conditionId':'c','question':'Match winner',
+            'comboStatus':'enabled','active':True,'acceptingOrders':True},T.isoformat())
+        self.assertFalse(m['is_combo'])
+        self.assertEqual(m['combo_eligibility_status'],'enabled')
+        self.assertEqual([x['id'] for x in select([m],20,.2,T)],['sport'])

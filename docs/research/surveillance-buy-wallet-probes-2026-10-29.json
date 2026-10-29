@@ -1,0 +1,132 @@
+{
+  "method": "Event-time retrospective probes at first alert, not current wallet history",
+  "results": [
+    {
+      "case": "maduro-reported",
+      "at_cutoff": "2026-01-02T16:50:00+00:00",
+      "wallet": "0x31a56e9e690c621ed21de08cb559e9524cdb8ed9",
+      "selection": "Largest observed taker cash flow on dominant side of first research_buy_gate alert",
+      "window_wallet_cash": 5999.9999974918,
+      "rows": 8,
+      "api_walk_complete": true,
+      "distinct_markets": 4,
+      "distinct_events": 4,
+      "earliest_indexed_trade_in_retrieved_history": "2025-12-27T05:05:41+00:00",
+      "visible_history_span_hours": 155.7386111111111,
+      "largest_event_share_of_observed_gross_cash": 0.9048412039407769,
+      "events": {
+        "maduro-out-in-2025": 12323.339998754172,
+        "trump-invokes-war-powers-against-venezuela-by": 199.9999979897222,
+        "will-the-us-invade-venezuela-in-2025": 999.9999991187187,
+        "us-forces-in-venezuela-by": 96.00000002107512
+      },
+      "receipts": [
+        {
+          "path": "page-00.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x31a56e9e690c621ed21de08cb559e9524cdb8ed9&start=1&end=1767372600&taker_only=false&limit=1000",
+          "sha256": "bc3ed8b23a0e8781fb9af3c50ed485064c606f572cc2807cac213232b274abda",
+          "received_at": "2026-10-29T10:02:10.832097+00:00"
+        }
+      ],
+      "limitations": [
+        "Retrospective receipt time; historical delivery unknown",
+        "Five-page cap; concentration is conditional on retrieved history if incomplete",
+        "Indexed first trade is not account creation or identity proof",
+        "Cash turnover is not position, profit or coordinated-wallet attribution"
+      ]
+    },
+    {
+      "case": "nobel-machado-reported",
+      "at_cutoff": "2025-10-09T22:55:00+00:00",
+      "wallet": "0xa430506774f9efaf39903ee7e0db1351f66891ca",
+      "selection": "Largest observed taker cash flow on dominant side of first research_buy_gate alert",
+      "window_wallet_cash": 2641.6178392990782,
+      "rows": 15,
+      "api_walk_complete": true,
+      "distinct_markets": 2,
+      "distinct_events": 1,
+      "earliest_indexed_trade_in_retrieved_history": "2025-10-09T22:42:57+00:00",
+      "visible_history_span_hours": 0.20083333333333334,
+      "largest_event_share_of_observed_gross_cash": 1,
+      "events": {
+        "nobel-peace-prize-winner-2025": 4837.912042298679
+      },
+      "receipts": [
+        {
+          "path": "page-00.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0xa430506774f9efaf39903ee7e0db1351f66891ca&start=1&end=1760050500&taker_only=false&limit=1000",
+          "sha256": "4047f1ae72d3c7a8d2f1907eeb539e788dcc7925b9f62fd9904fcb95d4035a20",
+          "received_at": "2026-10-29T10:02:11.019018+00:00"
+        }
+      ],
+      "limitations": [
+        "Retrospective receipt time; historical delivery unknown",
+        "Five-page cap; concentration is conditional on retrieved history if incomplete",
+        "Indexed first trade is not account creation or identity proof",
+        "Cash turnover is not position, profit or coordinated-wallet attribution"
+      ]
+    },
+    {
+      "case": "nobel-navalnaya-peer",
+      "at_cutoff": "2025-10-10T00:42:00+00:00",
+      "wallet": "0xa430506774f9efaf39903ee7e0db1351f66891ca",
+      "selection": "Largest observed taker cash flow on dominant side of first research_buy_gate alert",
+      "window_wallet_cash": 3551.65452036806,
+      "rows": 112,
+      "api_walk_complete": true,
+      "distinct_markets": 6,
+      "distinct_events": 1,
+      "earliest_indexed_trade_in_retrieved_history": "2025-10-09T22:42:57+00:00",
+      "visible_history_span_hours": 1.9841666666666666,
+      "largest_event_share_of_observed_gross_cash": 1,
+      "events": {
+        "nobel-peace-prize-winner-2025": 55416.44322029751
+      },
+      "receipts": [
+        {
+          "path": "page-00.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0xa430506774f9efaf39903ee7e0db1351f66891ca&start=1&end=1760056920&taker_only=false&limit=1000",
+          "sha256": "39806530ed1ce45163251715faf58db6af3b597a48f1d2f9483271ba065aa722",
+          "received_at": "2026-10-29T10:02:11.240993+00:00"
+        }
+      ],
+      "limitations": [
+        "Retrospective receipt time; historical delivery unknown",
+        "Five-page cap; concentration is conditional on retrieved history if incomplete",
+        "Indexed first trade is not account creation or identity proof",
+        "Cash turnover is not position, profit or coordinated-wallet attribution"
+      ]
+    },
+    {
+      "case": "nobel-sudan-peer",
+      "at_cutoff": "2025-10-09T18:00:00+00:00",
+      "wallet": "0x8c874f868c0510342814eac5fc9ef4bdcb90704a",
+      "selection": "Largest observed taker cash flow on dominant side of first research_buy_gate alert",
+      "window_wallet_cash": 9778.859997995607,
+      "rows": 1,
+      "api_walk_complete": true,
+      "distinct_markets": 1,
+      "distinct_events": 1,
+      "earliest_indexed_trade_in_retrieved_history": "2025-10-09T17:08:27+00:00",
+      "visible_history_span_hours": 0.8591666666666666,
+      "largest_event_share_of_observed_gross_cash": 1,
+      "events": {
+        "nobel-peace-prize-winner-2025": 9778.859997995607
+      },
+      "receipts": [
+        {
+          "path": "page-00.json",
+          "url": "https://data-api.polymarket.com/v2/trades?user=0x8c874f868c0510342814eac5fc9ef4bdcb90704a&start=1&end=1760032800&taker_only=false&limit=1000",
+          "sha256": "3244aa3325e815e739fde3c536b14079423738594a7bbda371755ce9e757b727",
+          "received_at": "2026-10-29T10:02:11.349744+00:00"
+        }
+      ],
+      "limitations": [
+        "Retrospective receipt time; historical delivery unknown",
+        "Five-page cap; concentration is conditional on retrieved history if incomplete",
+        "Indexed first trade is not account creation or identity proof",
+        "Cash turnover is not position, profit or coordinated-wallet attribution"
+      ]
+    }
+  ]
+}

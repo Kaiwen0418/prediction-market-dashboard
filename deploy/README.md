@@ -139,3 +139,60 @@ the separate dashboard backend continues normally. Use one collection worker.
 These are application admission budgets, **not filesystem hard quotas**: an
 in-flight page/API call, PostgreSQL WAL, Docker images/logs and VACUUM scratch
 space are additional. Keep at least 20 GiB free on the host for maintenance.
+
+### Lightweight discovery (v2)
+
+Automatic discovery now walks Polymarket `closed=false` and Kalshi
+`status=open&mve_filter=exclude`, with no topic/scope restriction. Closed history
+and MVE combinations are not automatically expanded. Catalog jobs use new
+`active:v2` identities so old opaque cursors cannot cross query scopes; legacy
+catalog jobs are disabled at startup. Completed walks repeat every six hours. At completion, up to 50,000 index rows
+not observed since that walk began expire, preserving case/manual references.
+Disappearance is not labelled settlement. Selection requires observations within
+two catalog intervals; unused rule snapshots expire through ordinary retention.
+
+The catalog omits rule prose and token IDs; all outcomes and lifecycle flags stay
+in the index. Only selected contracts receive a five-minute detail job, which
+stores versioned rules once. `settled`, `source_status`, `settlement_result`,
+`tradable` and `is_combo` preserve upstream state. Deep selection excludes pending
+resolution, paused/initialized/settled/combination contracts and schedule end times
+more than six hours old. This last test is a budget policy, not a declaration of
+settlement; metadata with incorrect end times can be missed. Twenty percent of
+selection remains hourly rotating exploration.
+
+Settings in `deploy/.env`: `SURVEILLANCE_CATALOG_SECONDS=21600`,
+`SURVEILLANCE_END_GRACE_HOURS=6`, and
+`SURVEILLANCE_AUTOMATIC_MIN_CASH_USD=1000`. The automatic dossier cash floor requires
+at least five fills, or a single-window notional of at least $10,000. Buy and sell
+signals remain eligible. Raw anomaly scores/manual replay remain available;
+this is a cost floor, not an insider classifier or calibrated probability.
+
+Closed-market backfill is explicit (numeric Polymarket market ID / Kalshi ticker):
+
+```sh
+python -m surveillance.cli backfill --venue polymarket --market 916440 --since 2025-12-26T00:00:00Z
+```
+
+The single worker resolves details then follows the trade cursor to the requested
+lower boundary and disables completed manual jobs. The scheduler does not disable
+unfinished manual jobs. Historical records keep their actual collection timestamps;
+strict as-of replay cannot pretend they were received in 2025. Kalshi contracts
+already moved to its historical archive may require a future archive adapter;
+a 404 is an explicit failed job, not a completed backfill. Backfill shares the
+same storage/capacity budgets and is not a permanent exemption from eviction.
+
+For this disposable test dataset the first optimized deployment resets the old
+surveillance tables and archive, freeing file space without rewriting millions of
+old documents. Stop the worker and investigation API, build the image, then run:
+
+```sh
+docker compose --env-file deploy/.env -f deploy/local.compose.yml run --rm --no-deps surveillance-api python -m surveillance.cli reset-test-data --confirm-test-data
+docker compose --env-file deploy/.env -f deploy/local.compose.yml up -d --no-build
+```
+
+This truncates only this module's known tables and deletes its configured raw
+folder, not the database or unrelated tables. Schema and credentials survive.
+Normal `update-local.sh` does not reset data. PostgreSQL and raw budgets remain
+20 GiB / 5 GiB with the existing 80%→60% eviction policy. Detailed rules for old
+selected contracts still expire by capacity/retention policy; catalogs are not a
+complete historical inventory.

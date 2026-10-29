@@ -24,13 +24,15 @@ async def prune(store, days=7, limit=50000):
         coverage = await c.execute("""DELETE FROM surveillance_coverage WHERE id IN (
             SELECT id FROM surveillance_coverage WHERE observed_at<%s LIMIT %s)""", (cutoff, limit))
         jobs = await c.execute("""DELETE FROM surveillance_jobs WHERE id IN (
-            SELECT id FROM surveillance_jobs WHERE NOT enabled AND kind IN ('trades','detect')
+            SELECT id FROM surveillance_jobs WHERE NOT enabled AND kind IN ('details','trades','detect','backfill')
             AND updated_at<%s AND (lease_until IS NULL OR lease_until<now()) LIMIT %s)""", (cutoff, limit))
         # A current rule snapshot and any case-pinned rule evidence survive expiry.
         rules = await c.execute("""DELETE FROM surveillance_rules r WHERE r.ctid IN (
             SELECT old.ctid FROM surveillance_rules old WHERE old.observed_at<%s
-            AND EXISTS (SELECT 1 FROM surveillance_rules newer WHERE newer.venue=old.venue
+            AND (EXISTS (SELECT 1 FROM surveillance_rules newer WHERE newer.venue=old.venue
                 AND newer.market_id=old.market_id AND newer.observed_at>old.observed_at)
+                OR (NOT EXISTS(SELECT 1 FROM surveillance_markets m WHERE m.venue=old.venue AND m.id=old.market_id)
+                    AND NOT EXISTS(SELECT 1 FROM surveillance_markets m WHERE m.venue=old.venue AND m.condition_id=old.market_id)))
             AND NOT EXISTS (SELECT 1 FROM surveillance_cases c WHERE c.document->>'rules_raw_id'=old.raw_id)
             LIMIT %s)""", (evidence_cutoff, limit))
         deleted = await (await c.execute("""WITH refs AS (
@@ -59,3 +61,25 @@ async def prune(store, days=7, limit=50000):
                 Path(path).unlink(missing_ok=True)
                 result["removed_blobs"] += 1
     return result
+
+
+async def reset_test_dataset(store, raw_dir):
+    """Discard this module's disposable dataset only; never drop the database."""
+    import asyncio
+    import shutil
+    from psycopg import sql
+    from .capacity import TABLES
+    root = Path(raw_dir).resolve()
+    if root == Path(root.anchor) or len(root.parts) < 3:
+        raise ValueError("Refusing a non-dedicated raw archive directory")
+    async with store.connection(exclusive=True) as c:
+        tables = (*TABLES, "surveillance_jobs", "surveillance_capacity")
+        await c.execute(sql.SQL("TRUNCATE {} RESTART IDENTITY").format(
+            sql.SQL(",").join(sql.Identifier(t) for t in tables)))
+        await c.commit()
+        if root.exists():
+            await asyncio.to_thread(shutil.rmtree, root)
+        root.mkdir(parents=True, exist_ok=True)
+    await store.coverage("system", "test_dataset_reset", {"reason": "lightweight active-catalog deployment",
+                         "historical_test_data_discarded": True})
+    return {"reset": True, "scope": "surveillance tables and configured raw directory only"}
