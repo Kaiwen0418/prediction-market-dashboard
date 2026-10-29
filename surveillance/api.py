@@ -130,6 +130,10 @@ def create_app(settings=None):
                     raise HTTPException(422, f"{key} requires timezone")
         if body.publication_time_verified and (not body.published_at or not body.verification_note):
             raise HTTPException(422, "Verified publication time requires a timestamp and verification note")
+        if body.publication_time_verified:
+            from datetime import datetime,timezone
+            if datetime.fromisoformat(record['published_at'])>datetime.now(timezone.utc):
+                raise HTTPException(422,'Verified publication cannot be in the future')
         key = digest(record)
         record.update(id=key, received_at=now(), first_seen_at=now(),
                       intake="manual evidence; URL/content not independently fetched or verified")
@@ -139,7 +143,40 @@ def create_app(settings=None):
             await store.insert_raw(c, raw)
             await c.execute("INSERT INTO surveillance_information(id,venue,market_id,document,raw_id) VALUES(%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                             (key, body.venue, body.market_id, Jsonb(record), raw["id"]))
-        return {"id": key}
+            if body.publication_time_verified:
+                from .event_review import enqueue_review
+                await enqueue_review(c, key, body.venue, now())
+        return {"id": key, "event_review_queued": body.publication_time_verified}
+
+    @app.post('/event-reviews/{information_id}')
+    async def queue_event_review(information_id: str, contract_only: bool = False):
+        rows = await store.fetch('SELECT venue,document FROM surveillance_information WHERE id=%s', (information_id,))
+        if not rows:
+            raise HTTPException(404, 'Information not found')
+        if not rows[0]['document'].get('publication_time_verified'):
+            raise HTTPException(422, 'Verified publication time required')
+        from .event_review import enqueue_review
+        async with store.connection() as c:
+            key = await enqueue_review(c,information_id,rows[0]['venue'],now(),contract_only)
+        return {'job_id': key}
+
+    @app.get('/aggregates')
+    async def aggregates(venue: Literal['polymarket','kalshi'], market_id: str,
+                         start: str, end: str, as_of: str, limit: int = Query(2016,ge=1,le=20000)):
+        from .aggregates import read_bins
+        try:
+            start,end,as_of = (timestamp(v) for v in (start,end,as_of))
+            from datetime import datetime,timedelta
+            if datetime.fromisoformat(end)-datetime.fromisoformat(start)>timedelta(days=7) or start>=end:
+                raise ValueError('Select an interval of at most seven days')
+            rows = await read_bins(store,venue,market_id,start,end,as_of,limit)
+        except (ValueError,TypeError,OverflowError) as exc:
+            raise HTTPException(422,str(exc))
+        return {'data': rows, 'missing_bins': 'unknown; never zero-filled', 'version_clock': 'actual materialization time'}
+
+    @app.get('/wallet-profiles')
+    async def wallet_profiles(case_id: str, limit: int = Query(20,ge=1,le=100)):
+        return await store.fetch('SELECT id,known_at,document FROM surveillance_wallet_profiles WHERE case_id=%s ORDER BY admitted_at DESC LIMIT %s', (case_id,limit))
 
     @app.post("/cases/{case_id}/information/{information_id}")
     async def attach_information(case_id: str, information_id: str):

@@ -101,7 +101,13 @@ class Collector:
                 cursor_key = "after_cursor"
             else:
                 url = "https://data-api.polymarket.com/v2/trades"
-                params.update(condition=payload["market_id"], taker_only="true")
+                if kind == 'wallet':
+                    from datetime import datetime
+                    params.update(user=payload['wallet'], taker_only='false', limit=500,
+                        start=int(datetime.fromisoformat(payload['since']).timestamp()),
+                        end=int(datetime.fromisoformat(payload['cutoff']).timestamp()))
+                else:
+                    params.update(condition=payload["market_id"], taker_only="true")
                 cursor_key = "cursor"
         else:
             url = "https://external-api.kalshi.com/trade-api/v2/markets"

@@ -62,3 +62,31 @@ CREATE INDEX IF NOT EXISTS surveillance_rules_raw ON surveillance_rules(raw_id);
 CREATE INDEX IF NOT EXISTS surveillance_markets_raw ON surveillance_markets(raw_id);
 CREATE INDEX IF NOT EXISTS surveillance_trades_raw ON surveillance_trades(raw_id);
 CREATE INDEX IF NOT EXISTS surveillance_information_raw ON surveillance_information(raw_id);
+
+-- Sparse five-minute bins. Corrections append versions with actual knowledge time.
+CREATE TABLE IF NOT EXISTS surveillance_dirty_bins (
+ venue text NOT NULL, market_id text NOT NULL, outcome text NOT NULL, bin_end timestamptz NOT NULL,
+ PRIMARY KEY(venue,market_id,outcome,bin_end)
+);
+CREATE TABLE IF NOT EXISTS surveillance_aggregates (
+ venue text NOT NULL, market_id text NOT NULL, outcome text NOT NULL, bin_end timestamptz NOT NULL,
+ known_at timestamptz NOT NULL, document jsonb NOT NULL, raw_ids text[] NOT NULL,
+ PRIMARY KEY(venue,market_id,outcome,bin_end,known_at)
+);
+CREATE TABLE IF NOT EXISTS surveillance_walks (
+ id text PRIMARY KEY, venue text NOT NULL, market_id text NOT NULL,
+ lower_time timestamptz NOT NULL, upper_time timestamptz NOT NULL, known_at timestamptz NOT NULL,
+ raw_ids text[] NOT NULL, refs_complete boolean NOT NULL, observed_trades integer NOT NULL DEFAULT -1
+);
+ALTER TABLE surveillance_walks ADD COLUMN IF NOT EXISTS observed_trades integer NOT NULL DEFAULT -1;
+CREATE INDEX IF NOT EXISTS surveillance_walk_window ON surveillance_walks(venue,market_id,upper_time);
+CREATE TABLE IF NOT EXISTS surveillance_wallet_profiles (
+ id text PRIMARY KEY, case_id text NOT NULL, wallet text NOT NULL,
+ admitted_at timestamptz NOT NULL DEFAULT now(), known_at timestamptz,
+ document jsonb NOT NULL, raw_ids text[] NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS surveillance_profile_admission ON surveillance_wallet_profiles(admitted_at);
+CREATE INDEX IF NOT EXISTS surveillance_aggregate_raw ON surveillance_aggregates USING gin(raw_ids);
+CREATE INDEX IF NOT EXISTS surveillance_walk_raw ON surveillance_walks USING gin(raw_ids);
+CREATE INDEX IF NOT EXISTS surveillance_profile_raw ON surveillance_wallet_profiles USING gin(raw_ids);
+INSERT INTO surveillance_schema VALUES (2) ON CONFLICT DO NOTHING;
