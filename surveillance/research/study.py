@@ -14,7 +14,7 @@ import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from surveillance.detectors import evaluate, automatic_candidate, VERSION
+from surveillance.research.legacy_detector import evaluate, automatic_candidate, VERSION
 from surveillance.normalization import trade
 
 
@@ -175,7 +175,7 @@ def main():
     results = [run_case(c, tapes[c["dataset"]]) for c in cases]
     output = {"generated_at": datetime.now(timezone.utc).isoformat(),
               "source_hashes": {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in
-                                (Path(__file__).parent.parent/"detectors.py", Path(__file__).parent.parent/"normalization.py", Path(__file__))},
+                                (Path(__file__).parent/"legacy_detector.py", Path(__file__).parent.parent/"normalization.py", Path(__file__))},
               "assumptions": ["Retrospective selected reported cases; no accuracy estimate",
                               "Historical delivery unknown; event_time used as hypothetical receipt time in memory",
                               "Peers can have legitimate correlated event information; not certified clean negatives",

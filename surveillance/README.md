@@ -50,13 +50,13 @@ recovers after the five-minute database lease expires.
   query, status and receipt timestamp. `verify` reopens files and checks hashes.
   Identical response bytes share a content-addressed blob; each HTTP receipt retains its own database provenance. Crash-orphaned Parquet files
   may remain if the database index commit failed; they are not silently deleted.
-- Default budget: 100 selected contracts per venue, with 20% hourly rotating
+- Default budget: 100 selected contracts per venue, with 20% six-hour rotating
   exploration. Rules/category keywords and proximity provide an initial ranking;
   no category is excluded from discovery. Paused jobs preserve cursors. Active
   candidates cause an immediate collection request within the selected budget.
 - Versioned 1-minute / 5-minute / 1-hour volume, direction and price-change
-  detectors. Per-market median/MAD over 12 preceding windows. At least six nonempty
-  baseline windows are required to use the volume-spike component.
+  detectors. Per-market median/MAD over 12 preceding windows. At least six fully sampled, cash-complete
+  baseline windows are required for the cash-spike component; observed zero is valid, unknown is not.
 - Persisted candidate dossiers with trade/raw references, frozen rule version,
   replay input IDs, score components, wallet observations where attributable,
   alternative explanations and open questions. API/CLI reports and versioned reviews.
@@ -72,13 +72,14 @@ budgets and completed walks; it never declares whole-platform coverage based on 
 unknown denominator. Kalshi historical archive discovery is not yet integrated.
 The catalog preserves all records actually returned by these endpoints.
 
-Trade bootstrap covers the last 13 hours, not all history. A newest-first walk stops
+Cold deep trade bootstrap requests one hour; wide bootstrap requests five minutes.
+The detector reads up to 13 hours of retained observations, not all history. A newest-first walk stops
 only after crossing its lower bound, including every row at the boundary second.
 Polymarket condition feeds ignore time filters: the worker walks the cursor and
 applies the boundary locally. Kalshi pins `min_ts` throughout the walk. Subsequent
 polls overlap five minutes. Older delayed upstream inserts can still be missed;
 no exactly-once upstream completeness claim is made. Polymarket's upstream minimum
-trade-size filter also applies. There is no wide global trade collector yet.
+trade-size filter also applies. Independent paginated global trade collectors are enabled on both venues.
 
 Polymarket v2 public rows do not expose a unique fill ID. Identity combines the
 execution fields and a per-scan occurrence count, retained across page checkpoints.
@@ -86,7 +87,8 @@ This preserves identical rows within a stable newest-first walk and deduplicates
 repeat polls. Identical fills cannot be independently distinguished or audited as
 on-chain log indices; feed reorganization/correction remains a limitation. Wallet
 addresses are public proxy wallets, not identities or verified linked accounts.
-The wallet summary covers the anomaly window only, not account age or full history.
+The original alert wallet summary covers its anomaly window; bounded multi-day
+rollups and optional self-history enrichment add separate observations, not account age.
 
 Kalshi `taker_outcome_side` and `taker_book_side` encode **the same directional bit**:
 YES/bid is positive YES exposure, NO/ask negative. They must not be multiplied.
@@ -94,25 +96,28 @@ Block trades are excluded from order-flow imbalance. No other user's account
 profile can be constructed from the public tape. Polymarket signals are grouped by
 outcome token; buying NO is not pooled with buying YES.
 
-All detector inputs satisfy both `event_time <= as_of` and `received_at <= as_of`.
-Rule snapshots must have been observed by `as_of`. Unchanged rules reuse the existing version. Later intake can carry an older
+Detector inputs satisfy `event_time <= as_of` and `received_at <= knowledge_cutoff`.
+Ordinary historical replay defaults `knowledge_cutoff=as_of`. Delayed observations
+use an explicitly later knowledge cutoff and retain actual alert creation time.
+Rule snapshots must have been observed by the knowledge cutoff. Unchanged rules reuse the existing version. Later intake can carry an older
 `published_at`, but cannot enter the detection-time timeline retroactively.
 `first_seen_at` is our first receipt, not first public availability. Publication
 verification is a reviewer assertion with a required note, not automated fact checking.
 
-`anomaly_score` is a weighted heuristic: volume spike 50%, directional
-imbalance 30%, within-window price change 20%. Direction/price components require
-five observations. `evidence_quality` starts at 30, adds 15 for observed rules and
-15 for sufficient baseline; this is preliminary and does not certify completeness.
+`anomaly_score` is a weighted heuristic: cash spike 50%, cash-weighted directional
+imbalance 30%, direction-consistent sustained trade-price change 20%. Direction/price
+components require five observations. `evidence_quality` reports rule availability,
+current sampled coverage, observed baseline count and receipt delay; its heuristic
+weights do not certify completeness.
 `investigation_priority` combines anomaly, quality and category tier. **None of
 these measures is an insider-trading probability.** No outcomes or realized PnL are
 used to score a detection.
 
 No historical executable order books are collected yet. Price change is not proof
 of a sweep, depth consumption, persistence, information advantage or causation.
-There is no peer-market calibration, automatic news/sports ingestion, wallet history
-expansion, verified cross-platform rule mapping, cross-platform lead/lag detector,
-post-resolution backtest, or seven-day threshold calibration in this implementation.
+There is no peer-market calibration, automatic news/sports ingestion,
+verified cross-platform rule mapping, cross-platform lead/lag detector,
+population-wide profit backtest, or seven-day threshold calibration in this implementation.
 These remain necessary before the proposed full investigation service is accepted.
 
 ## API and CLI
@@ -325,3 +330,68 @@ Exact-ID/condition metadata lookup explicitly retries `closed=true` when the def
 open listing is empty, then uses the individual ID endpoint if needed. This preserves
 historical investigations and recognizes selected contracts that have just closed;
 it never treats an empty open listing as proof that the contract does not exist.
+
+
+## Cash, observation clocks and multi-day signals (schema 4 / detector v2.0)
+
+Kalshi trade prices remain YES quotes for price comparison, but dollar turnover
+uses the taker outcome premium: NO uses its observed NO price or `1 - YES price`.
+Unknown taker outcomes produce unknown cash. Existing fill fingerprints do not change.
+A one-off migration queues corrected versions of retained Kalshi five-minute bins;
+legacy versions remain readable and are marked cash-incomplete.
+
+Completed, fully referenced REST walks append sampled observation intervals in the
+same transaction as their checkpoint. The interval ends at the first-page source
+head, bounded by receipt time; cached empty pages subtract HTTP Age or max-age.
+Pending/legacy walks and missing intervals do not establish zero activity. This
+is API sampling evidence, not a guarantee of exchange completeness.
+
+The rolling detector compares twelve equal prior windows; six sampled windows
+are needed for the cash-spike component. Current sampling and known cash are
+required for automatic case admission. Direction-consistent price persistence is
+a trade-price proxy; executable-depth sweeps still cannot be inferred. The worker
+uses source-head event windows and actual current knowledge/alert times. Late
+upstream inserts older than finite overlap, and multiple price spikes between
+polls, can still be missed. No WS or sub-minute latency claim is made.
+
+Outside the 100-contract deep pool, each venue's one-minute scanner considers at
+most 5,000 recently observed scout contracts with >=$1,000, queues at most 20
+one-off detections, excludes deep detections, applies two contracts per event and
+a five-minute repeat cooldown. The scan does not increase the selected pool.
+Metadata lookups and activity-based promotion remain separate bounded steps.
+
+Polymarket fills newly inserted into the trade table also update seven retained
+UTC dates of wallet/market/outcome cells. Admission is capped at 200,000 cells;
+existing cells still update at capacity, while skipped new cells emit hourly
+coverage telemetry. Each cell retains <=64 receipt IDs, with truncation explicit.
+Hourly slow-accumulation candidates require >=2 observed dates, >=6 hours, >=3
+fills, >=$1,000 observed buy cash, and observed buy shares minus sell shares >=80%
+of buy shares. These are descriptive candidates with null scores, not an inventory
+claim, statistical significance or a complete wallet history.
+
+Verified manual information anchors drive a separate result ledger. At most 20
+anchors are processed per hourly pass (60s continuation if paginated); per anchor
+<=20 native sibling contracts, <=50,000 fills, and top 50 observed wallets are
+considered. Unknown settlements queue <=20 pending one-off detail refreshes globally,
+with hourly cooldown and three source failures before stopping. Final outcomes
+require a final source status and exact valid outcome prices. Only independent
+native events count; the earliest retained verified anchor wins, including anchors
+with zero observed fills. Earlier counter-evidence invalidates later-anchor matches
+and updates existing repeat candidates without erasing their historical versions. Mismatches, mixed
+exposure, unknown direction and unresolved events remain in the denominator.
+Three matching selected events may create a separate null-score review candidate.
+No retrospective result changes the original trading alert.
+
+`GET /wallets/{wallet}/patterns?as_of=...` reads ledger versions known by that
+cutoff. `POST /replay` accepts an optional `knowledge_cutoff`; default is the event
+cutoff, not now. Cases distinguish pre-anchor trade time, receipt time and a real
+case created before publication. Event anchors do not prove earliest availability,
+and a wallet address does not establish identity, coordination, profit or insider trading.
+
+New summaries/observations share existing 20 GiB DB / 5 GiB raw admission budgets,
+seven-day retention and FIFO dependency expiry. Case-pinned observation intervals
+survive independent derived-row cleanup; source FIFO still expires dependent cases.
+Historical `research.study` intentionally runs frozen v1.1 from
+`research/legacy_detector.py`; archived study results are not v2.0 validation.
+Run `python -m surveillance.research.benchmark_signals` in the API container for an
+isolated 200,000-cell and 50,000-fill cost probe.

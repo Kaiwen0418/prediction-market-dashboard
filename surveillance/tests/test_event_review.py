@@ -85,7 +85,7 @@ class ReviewTests(unittest.IsolatedAsyncioTestCase):
         raw=self.archive.write('polymarket','test',{},200,b'empty walk')
         j=await self.job('walk')
         await self.store.commit_page(j,raw,{},completed_walk=dict(lower_time=(anchor-timedelta(hours=1)).isoformat(),
-            upper_time=anchor.isoformat(),raw_ids=[raw['id']],refs_complete=True,observed_trades=0))
+            upper_time=anchor.isoformat(),source_upper=anchor.isoformat(),raw_ids=[raw['id']],refs_complete=True,observed_trades=0))
         doc=await build_review(self.store,info,now())
         self.assertEqual(doc['contracts'][0]['windows'][0]['observation'],'sampled_no_trades')
         self.assertEqual(doc['contracts'][0]['windows'][0]['fully_sampled_api_bins'],12)

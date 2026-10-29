@@ -86,7 +86,7 @@ class Store:
             return await (await c.execute("""
                 UPDATE surveillance_jobs SET lease_until=now()+interval '5 minutes', lease_token=%s
                 WHERE id=(SELECT id FROM surveillance_jobs WHERE enabled AND due_at<=now()
-                    AND (lease_until IS NULL OR lease_until<now()) ORDER BY CASE kind WHEN 'wide' THEN 0 WHEN 'schedule' THEN 1 WHEN 'aggregates' THEN 2 WHEN 'detect' THEN 3 ELSE 4 END,due_at,CASE kind WHEN 'details' THEN 0 ELSE 1 END,id
+                    AND (lease_until IS NULL OR lease_until<now()) ORDER BY CASE kind WHEN 'wide' THEN 0 WHEN 'schedule' THEN 1 WHEN 'aggregates' THEN 2 WHEN 'candidate_scan' THEN 3 WHEN 'detect' THEN 4 WHEN 'scout_detect' THEN 4 ELSE 5 END,due_at,CASE kind WHEN 'details' THEN 0 ELSE 1 END,id
                     FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *
             """, (token,))).fetchone()
 
@@ -163,6 +163,7 @@ class Store:
                 checkpoint["expired_unseen_index_rows"] = expired.rowcount
                 checkpoint["expiry_meaning"] = "Absent from completed active walk; not proof of settlement; case/manual references retained"
             if trades:
+                from .money import cash_sql
                 # Set-based insertion returns only new fills, so replayed/global pages
                 # cannot inflate live scout counters or dirty every duplicate bucket.
                 inserted=await (await c.execute("""INSERT INTO surveillance_trades
@@ -175,10 +176,10 @@ class Store:
                 if new:
                     from .aggregates import dirty
                     await dirty(c,new)
-                    await c.execute("""INSERT INTO surveillance_scout
+                    await c.execute(f"""INSERT INTO surveillance_scout
                         SELECT t->>'venue',t->>'market_id',
                             to_timestamp(floor(extract(epoch FROM (t->>'event_time')::timestamptz)/300)*300),
-                            now(),count(*),sum((t->>'price')::numeric*(t->>'quantity')::numeric),
+                            now(),count(*),COALESCE(sum({cash_sql('t',"(t->>'venue')")}),0),
                             max((t->>'event_time')::timestamptz)
                         FROM jsonb_array_elements(%s) t
                         WHERE t->>'collection_scope'='wide' AND (t->>'event_time')::timestamptz>=now()-interval '15 minutes'
@@ -186,9 +187,18 @@ class Store:
                         GROUP BY 1,2,3 ON CONFLICT(venue,market_id,bucket) DO UPDATE
                         SET fills=surveillance_scout.fills+EXCLUDED.fills,cash=surveillance_scout.cash+EXCLUDED.cash,
                             known_at=now(),last_event=GREATEST(surveillance_scout.last_event,EXCLUDED.last_event)""",(Jsonb(new),))
+            if trades and new:
+                from .longitudinal import ingest_daily
+                await ingest_daily(c,new,raw["id"])
             if completed_walk:
                 from .aggregates import record_walk
-                await record_walk(c, job, completed_walk)
+                if job['kind']!='wide' and completed_walk.get('source_upper'):
+                    await record_walk(c,job,dict(completed_walk,upper_time=completed_walk['source_upper']))
+                from .normalization import digest,now
+                if completed_walk.get('source_upper') and completed_walk['lower_time']<completed_walk['source_upper']:
+                    await c.execute('INSERT INTO surveillance_observations VALUES(%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING',
+                        (digest([job['id'],completed_walk]),job['venue'],None if job['kind']=='wide' else job['payload']['market_id'],
+                         completed_walk['lower_time'],completed_walk['source_upper'],now(),completed_walk['raw_ids'],completed_walk['refs_complete']))
             await c.execute("""UPDATE surveillance_jobs SET checkpoint=%s,lease_until=now()+interval '5 minutes',
                             updated_at=now() WHERE id=%s""", (Jsonb(checkpoint), job["id"]))
 
@@ -241,16 +251,17 @@ class Store:
             await c.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (group,))
             recent = await (await c.execute("""SELECT document FROM surveillance_cases WHERE venue=%s AND market_id=%s
                 AND created_at>now()-(%s * interval '1 second') AND document->>'outcome_key'=%s
-                AND document->'signal'->>'window_seconds'=%s ORDER BY created_at DESC LIMIT 1""",
+                AND document->'signal'->>'window_seconds'=%s
+                AND COALESCE(document->'signal'->>'detector_version','legacy')=%s ORDER BY created_at DESC LIMIT 1""",
                 (document["venue"], document["market_id"], cooldown_seconds, str(document["outcome_key"]),
-                 str(document["signal"]["window_seconds"])))).fetchone()
+                 str(document["signal"]["window_seconds"]),document["signal"].get("detector_version","legacy")))).fetchone()
             if recent and document["anomaly_score"] < recent["document"]["anomaly_score"] + 20:
                 return False
-            await c.execute("""INSERT INTO surveillance_cases(id,venue,market_id,status,document)
-                VALUES(%s,%s,%s,'candidate',%s) ON CONFLICT DO NOTHING""",
-                (document["id"], document["venue"], document["market_id"], Jsonb(document)))
-            await c.execute("""INSERT INTO surveillance_case_versions(case_id,version,document)
-                VALUES(%s,1,%s) ON CONFLICT DO NOTHING""", (document["id"], Jsonb(document)))
+            inserted=await (await c.execute("""INSERT INTO surveillance_cases(id,venue,market_id,status,document)
+                VALUES(%s,%s,%s,'candidate',%s) ON CONFLICT DO NOTHING RETURNING id""",
+                (document['id'],document['venue'],document['market_id'],Jsonb(document)))).fetchone()
+            if not inserted:return False
+            await c.execute('INSERT INTO surveillance_case_versions(case_id,version,document) VALUES(%s,1,%s)',(document['id'],Jsonb(document)))
             return True
 
     async def update_dossier(self, document):

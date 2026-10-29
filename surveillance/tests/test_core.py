@@ -92,12 +92,13 @@ class CoreTests(unittest.TestCase):
             t = trade("polymarket", dict(poly(), size=100, price=0.4 + i * 0.02,
                       timestamp=int((T - timedelta(seconds=30 - i)).timestamp())), T.isoformat())
             rows.append(dict(t, id=f"current{i}"))
-        score = evaluate(rows, T.isoformat())[0]
+        coverage=[(T-timedelta(hours=13),T)]
+        score = evaluate(rows,T.isoformat(),coverage=coverage)[0]
         self.assertGreater(score["anomaly_score"], 90)
         future = dict(rows[-1], id="future", event_time=(T + timedelta(seconds=1)).isoformat())
         late = dict(rows[-1], id="late", received_at=(T + timedelta(seconds=1)).isoformat())
-        self.assertEqual(evaluate(rows + [future, late], T.isoformat())[0], score)
-        self.assertEqual(evaluate(rows, T.isoformat())[0], score)
+        self.assertEqual(evaluate(rows+[future,late],T.isoformat(),coverage=coverage)[0], score)
+        self.assertEqual(evaluate(rows,T.isoformat(),coverage=coverage)[0],score)
 
     def test_block_trades_excluded_from_order_flow_imbalance(self):
         t = trade("kalshi", kalshi(is_block_trade=True), T.isoformat())
@@ -139,8 +140,8 @@ class CoreTests(unittest.TestCase):
         signal = evaluate(rows,T.isoformat())[0]
         self.assertEqual(signal["cash_notional_usd"],1)
         self.assertFalse(automatic_candidate(signal))
-        self.assertTrue(automatic_candidate(dict(signal,cash_notional_usd=15000,trade_count=1)))
-        self.assertTrue(automatic_candidate(dict(signal,cash_notional_usd=1000,trade_count=5,signed_imbalance=-1)))
+        self.assertTrue(automatic_candidate(dict(signal,cash_notional_usd=15000,trade_count=1,current_fully_observed=True)))
+        self.assertTrue(automatic_candidate(dict(signal,cash_notional_usd=1000,trade_count=5,signed_imbalance=-1,current_fully_observed=True)))
         self.assertIsNone(evaluate([dict(trade("kalshi",kalshi(),T.isoformat()),id="anonymous")],T.isoformat())[0]["largest_public_wallet_buy_share"])
 
     def test_polymarket_combo_eligibility_does_not_hide_individual_markets(self):

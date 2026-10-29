@@ -37,9 +37,13 @@ async def main():
     receipts=await store.fetch("""SELECT venue,count(*) AS pages_5m FROM surveillance_raw
         WHERE received_at>now()-interval '5 minutes' AND source LIKE '%%/trades'
         AND NOT(params ? 'condition') AND NOT(params ? 'ticker') AND NOT(params ? 'user') GROUP BY venue""")
-    files=('worker.py','storage.py','discovery.py','collectors.py','normalization.py','schema.sql','aggregates.py','config.py')
+    files=('worker.py','storage.py','discovery.py','collectors.py','normalization.py','schema.sql','aggregates.py','config.py','detectors.py','observation.py','screening.py','longitudinal.py','money.py','investigations.py')
     print(json.dumps(dict(at=datetime.now(timezone.utc).isoformat(),settings=dict(contracts_per_venue=settings.contracts_per_venue,deep_poll_seconds=settings.poll_seconds,detail_seconds=settings.detail_seconds,wide_poll_seconds=settings.wide_poll_seconds,pages_per_claim=settings.pages_per_job),usage=await usage(store,settings),
         selection=selection,wide=broad,wide_jobs=job_state,wide_pages_5m=receipts,detector_ages=lags,
+        observation_intervals=await store.fetch("SELECT venue,count(*) AS intervals,min(lower_time) AS oldest_sampled,max(upper_time) AS source_head,max(known_at) AS latest_known FROM surveillance_observations GROUP BY venue"),
+        multi_day=await store.fetch("SELECT count(*) AS daily_cells,pg_total_relation_size('surveillance_wallet_daily') AS bytes,min(first_event) AS oldest_event,max(last_event) AS newest_event FROM surveillance_wallet_daily"),
+        case_kinds=await store.fetch("SELECT COALESCE(document->>'kind','legacy') AS kind,count(*) AS cases FROM surveillance_cases GROUP BY 1"),
+        first_pass=await store.fetch("SELECT venue,checkpoint FROM surveillance_jobs WHERE kind='candidate_scan' ORDER BY venue"),
         pending_bins=await store.fetch("SELECT count(*) AS n,count(*) FILTER(WHERE bin_end<=now()) AS closed_ready,min(bin_end) AS oldest FROM surveillance_dirty_bins"),
         source_sha256={name:hashlib.sha256((Path('surveillance')/name).read_bytes()).hexdigest() for name in files},
         caveat='Bounded REST observations; counts are not platform coverage percentages; startup includes metadata repair/history warmup'),default=str,indent=2))

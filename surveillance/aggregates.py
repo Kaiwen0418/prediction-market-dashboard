@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from psycopg.types.json import Jsonb
 
 from .normalization import digest, now, timestamp
+from .money import cash_sql
 
 
 async def dirty(c, trades):
@@ -26,12 +27,12 @@ async def materialize(store, limit=2000):
             ORDER BY bin_end LIMIT %s FOR UPDATE SKIP LOCKED''', (known_at, limit))).fetchall()
         for b in bins:
             key = (b['venue'], b['market_id'], b['outcome'], b['bin_end'])
-            row = await (await c.execute('''SELECT count(*) AS fills,
+            row = await (await c.execute(f'''SELECT count(*) AS fills,count(*) FILTER(WHERE {cash_sql()} IS NULL) AS unknown_cash_fills,
                 COALESCE(sum((document->>'quantity')::numeric),0)::text AS shares,
-                COALESCE(sum((document->>'quantity')::numeric*(document->>'price')::numeric),0)::text AS cash,
-                COALESCE(sum((document->>'quantity')::numeric*(document->>'price')::numeric)
+                COALESCE(sum({cash_sql()}),0)::text AS cash,
+                COALESCE(sum({cash_sql()})
                     FILTER(WHERE document->>'direction'='1' AND NOT COALESCE((document->>'is_block_trade')::boolean,false)),0)::text AS buy_cash,
-                COALESCE(sum((document->>'quantity')::numeric*(document->>'price')::numeric)
+                COALESCE(sum({cash_sql()})
                     FILTER(WHERE document->>'direction'='-1' AND NOT COALESCE((document->>'is_block_trade')::boolean,false)),0)::text AS sell_cash
                 FROM surveillance_trades WHERE venue=%s AND market_id=%s
                 AND COALESCE(NULLIF(document->>'token_id',''),outcome)=%s
@@ -43,7 +44,7 @@ async def materialize(store, limit=2000):
                 ORDER BY raw_id LIMIT 65''', (*key, b['bin_end'], known_at))).fetchall()
             # Expired source rows cannot overwrite a retained positive version with zero.
             if row['fills']:
-                row.update(coverage='observed_trades; upstream completeness unknown', refs_complete=len(refs)<=64)
+                row.update(cash_complete=row['unknown_cash_fills']==0,aggregation_version='cash-v2',coverage='observed_trades; upstream completeness unknown', refs_complete=len(refs)<=64)
                 raw_ids = [r['raw_id'] for r in refs[:64] if r['raw_id']]
                 row['content_hash'] = digest([row, raw_ids])
                 previous = await (await c.execute('''SELECT document FROM surveillance_aggregates WHERE
@@ -62,6 +63,9 @@ async def read_bins(store, venue, market_id, start, end, as_of, limit=20000):
         ORDER BY outcome,bin_end,known_at DESC LIMIT %s''', (venue,market_id,start,end,as_of,limit+1))
     if len(rows)>limit:
         raise ValueError('Aggregate query budget exceeded; shorten the interval')
+    for row in rows:
+        if venue=='kalshi' and row['document'].get('aggregation_version')!='cash-v2':
+            row['document'].update(cash_complete=False,cash_basis='legacy_yes_quote; corrected version pending')
     return rows
 
 

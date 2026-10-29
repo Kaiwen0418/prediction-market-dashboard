@@ -131,7 +131,10 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
                          yes_price_dollars=str(0.3 + i * 0.03), ticker="c1")
             trades.append(dict(trade("kalshi", row, observed), id=f"kt{i}"))
         m = market("kalshi", {"ticker": "c1", "event_ticker": "e1", "rules_primary": "old rules", "title": "Policy announcement"}, observed)
-        await self.store.commit_page(job, raw, {}, markets=[m], trades=trades)
+        await self.store.commit_page(job,raw,{},markets=[m],trades=trades,completed_walk=dict(
+            lower_time=(cutoff-timedelta(hours=13)).isoformat(),upper_time=cutoff.isoformat(),source_upper=cutoff.isoformat(),raw_ids=[raw['id']],refs_complete=True,observed_trades=len(trades)))
+        async with self.store.connection() as c:
+            await c.execute('UPDATE surveillance_observations SET known_at=%s',(observed,))
         # A subsequent rule snapshot must not leak into the historical case.
         changed = dict(m, rules={"rules_primary": "future rules"}, rules_hash="new", observed_at=now())
         await self.store.commit_page(job, raw, {}, markets=[changed])
@@ -406,7 +409,8 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         for i in range(10):
             r=dict(poly(),size=1000,price=.001,timestamp=int((cutoff-timedelta(seconds=30-i)).timestamp()))
             rows.append(dict(trade("polymarket",r,observed),id=f"spike{i}"))
-        await self.store.commit_page(job,raw,{},trades=rows)
+        await self.store.commit_page(job,raw,{},trades=rows,completed_walk=dict(
+            lower_time=(cutoff-timedelta(hours=13)).isoformat(),upper_time=cutoff.isoformat(),source_upper=cutoff.isoformat(),raw_ids=[raw['id']],refs_complete=True,observed_trades=len(rows)))
         await self.store.release(job,3600)
         await self.store.enqueue("detect-test","detect","polymarket",{"market_id":"c1"})
         worker=Worker(self.settings)

@@ -1,6 +1,6 @@
 """Explicit units and outcome semantics. Unknown direction stays unknown."""
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
@@ -76,6 +76,15 @@ def market(venue, row, received_at):
     source_fields = {'event_ids':'events','tags':'tags','category':'category','sports_market_type':'sportsMarketType',
                      'volume_24h':'volume24hr','liquidity':'liquidityNum'} if venue=='polymarket' else {
                      'event_ids':'event_ticker','category':'category','series_ticker':'series_ticker','volume_24h':'volume_24h_fp'}
+    resolved_outcome=row.get('result') if venue=='kalshi' and settled else None
+    if venue=='polymarket' and settled:
+        try:
+            prices=[Decimal(str(p)) for p in array(row.get('outcomePrices'))]
+            if len(prices)==len(outcomes) and all(p.is_finite() and p in (0,1) for p in prices) and prices.count(Decimal(1))==1:
+                resolved_outcome=outcomes[prices.index(Decimal(1))]
+        except (InvalidOperation,ValueError,TypeError):
+            pass  # Invalid settlement fields are unknown evidence, not a winning outcome.
+    result['resolved_outcome']=resolved_outcome
     volume_key=('volumeNum' if 'volumeNum' in row else 'volume') if venue=='polymarket' else 'volume_fp'
     source_fields.update(volume=volume_key,volume_reported=volume_key)
     result['volume_reported']=any(k in row and row[k] is not None for k in ('volume','volumeNum','volume_fp'))
@@ -125,4 +134,11 @@ def trade(venue, row, received_at):
                       transaction_hash=None, identity_quality="venue_trade_id",
                       is_block_trade=bool(row.get("is_block_trade", False)))
         identity = str(row["trade_id"])
+    from .money import cash_price
+    premium=cash_price(dict(result,venue=venue))
+    if venue=='kalshi' and result['direction']==-1 and row.get('no_price_dollars') is not None:
+        premium=Decimal(number(row['no_price_dollars'],maximum=1))
+    result.update(cash_price=str(premium) if premium is not None else None,
+        cash_notional=str(premium*Decimal(result['quantity'])) if premium is not None else None,
+        cash_basis='observed_outcome_premium' if premium is not None else 'unknown_taker_outcome')
     return dict(result, venue=venue, identity=identity, received_at=received_at, first_seen_at=received_at)

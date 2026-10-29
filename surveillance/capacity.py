@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 LOCK = 81724003
-DERIVED = ('surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles')
+DERIVED = ('surveillance_observations','surveillance_wallet_daily','surveillance_wallet_events','surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles')
 TABLES = ('surveillance_scout',*DERIVED, 'surveillance_dirty_bins', "surveillance_case_versions", "surveillance_cases", "surveillance_information",
           "surveillance_trades", "surveillance_rules", "surveillance_markets",
           "surveillance_raw", "surveillance_coverage")
@@ -57,6 +57,8 @@ async def evict_batch(c, limit=10000):
                        WHERE v#>>'{}'=ANY(%s))
             OR EXISTS (SELECT 1 FROM surveillance_trades t WHERE t.raw_id=ANY(%s)
                        AND c.document->'replay_input_ids' ? t.id)""", (cutoff, ids, ids, ids, ids))
+        await c.execute('''INSERT INTO capacity_cases SELECT c.id FROM surveillance_cases c WHERE EXISTS(
+            SELECT 1 FROM surveillance_observations o WHERE o.raw_ids && %s AND c.document->'observation_ids' ? o.id)''',(ids,))
         await c.execute("DELETE FROM surveillance_case_versions WHERE case_id IN(SELECT id FROM capacity_cases)")
         await c.execute("DELETE FROM surveillance_cases WHERE id IN(SELECT id FROM capacity_cases)")
         for table in DERIVED:
@@ -124,8 +126,14 @@ async def enforce(store, settings, batch_limit=10000, max_batches=8):
                 count += n
                 # Derived versions also need reclamation when raw receipts are gone.
                 for table in (*DERIVED,'surveillance_scout'):
-                    removed = await c.execute(sql.SQL('DELETE FROM {} WHERE ctid IN (SELECT ctid FROM {} ORDER BY {} LIMIT %s)').format(
-                        sql.Identifier(table),sql.Identifier(table),sql.Identifier('admitted_at' if table=='surveillance_wallet_profiles' else 'known_at')), (batch_limit,))
+                    if table=='surveillance_observations':
+                        removed=await c.execute('''DELETE FROM surveillance_observations WHERE id IN(
+                            SELECT o.id FROM surveillance_observations o WHERE NOT EXISTS(
+                                SELECT 1 FROM surveillance_cases c WHERE c.document->'observation_ids' ? o.id)
+                            ORDER BY known_at LIMIT %s)''',(batch_limit,))
+                    else:
+                        removed = await c.execute(sql.SQL('DELETE FROM {} WHERE ctid IN (SELECT ctid FROM {} ORDER BY {} LIMIT %s)').format(
+                            sql.Identifier(table),sql.Identifier(table),sql.Identifier('admitted_at' if table=='surveillance_wallet_profiles' else 'known_at')), (batch_limit,))
                     derived_count += removed.rowcount
                 await sweep_orphans(c, settings.raw_dir)
                 # DELETE alone does not reduce physical relation files. Bound each

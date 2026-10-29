@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 import hmac
 from typing import Literal
@@ -19,6 +20,7 @@ class ReplayRequest(BaseModel):
     venue: Literal["polymarket", "kalshi"]
     market_id: str = Field(min_length=1, max_length=256)
     as_of: str
+    knowledge_cutoff: str | None = None
 
 
 class Review(BaseModel):
@@ -76,6 +78,17 @@ def create_app(settings=None):
     async def coverage():
         return await completeness(store)
 
+    @app.get('/wallets/{wallet}/patterns')
+    async def wallet_pattern_summary(wallet: str,as_of: str | None = None):
+        import re
+        if not re.fullmatch(r'0x[0-9a-fA-F]{40}',wallet):raise HTTPException(422,'Valid public wallet required')
+        from .longitudinal import wallet_patterns
+        try:
+            cutoff=timestamp(as_of) if as_of else None
+            if cutoff and datetime.fromisoformat(cutoff)>datetime.now(timezone.utc):raise ValueError('Knowledge cutoff cannot be in the future')
+            return await wallet_patterns(store,wallet,cutoff)
+        except ValueError as exc:raise HTTPException(422,str(exc))
+
     @app.get('/selection')
     async def selection():
         return await store.fetch("""SELECT venue,payload,due_at,checkpoint FROM surveillance_jobs
@@ -121,9 +134,14 @@ def create_app(settings=None):
         except (ValueError, TypeError, OverflowError):
             raise HTTPException(422, "as_of must be a timezone-aware timestamp")
         try:
-            return await replay(store, body.venue, body.market_id, as_of, max_trades=settings.replay_max_trades)
+            from datetime import datetime,timezone
+            known=timestamp(body.knowledge_cutoff) if body.knowledge_cutoff else as_of
+            if datetime.fromisoformat(known)>datetime.now(timezone.utc):raise ValueError('Knowledge cutoff cannot be in the future')
+            return await replay(store,body.venue,body.market_id,as_of,max_trades=settings.replay_max_trades,knowledge_cutoff=known)
         except ReplayCapacityError as exc:
-            raise HTTPException(413, str(exc))
+            raise HTTPException(413,str(exc))
+        except (ValueError,TypeError) as exc:
+            raise HTTPException(422,str(exc))
 
     @app.post("/information")
     async def information(body: Information):

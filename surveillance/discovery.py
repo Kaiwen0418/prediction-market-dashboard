@@ -92,7 +92,8 @@ class Selector:
         # Only triage priority: never an insider score or a calibrated anomaly statistic.
         change=min(1,max(0,math.log1p(cash)-math.log1p(prior))/5) if prior else 0
         boost=min(1,math.log1p(cash)/15)+change
-        return urgency+min(math.log1p(float(m.get('volume_24h') or m.get('volume') or 0))/100,1)+boost+(.25 if key in self.previous else 0)
+        volume=m.get('volume_24h') if m.get('volume_24h') is not None else m.get('volume',0)
+        return urgency+min(math.log1p(float(volume or 0))/100,1)+boost+(.25 if key in self.previous else 0)
 
     def add(self,m):
         if m['closed'] or m.get('settled') or m.get('is_combo') or not m.get('tradable',True) or (m['venue']=='polymarket' and not m.get('condition_id')):
