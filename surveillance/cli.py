@@ -20,6 +20,11 @@ async def execute(args):
     await store.initialize()
     if args.command == "init":
         print("Schema ready")
+    elif args.command == 'recover-worker':
+        # Deployment stops the sole worker before this command. Checkpoints stay intact.
+        async with store.connection() as c:
+            result=await c.execute('UPDATE surveillance_jobs SET lease_until=NULL,lease_token=NULL WHERE lease_token IS NOT NULL')
+        print(json.dumps({'released_stopped_worker_leases':result.rowcount}))
     elif args.command == "worker":
         await Worker(settings).run(once=args.once)
     elif args.command == "reset-test-data":
@@ -92,7 +97,7 @@ async def execute(args):
 def main():
     parser = argparse.ArgumentParser(description="Independent read-only market surveillance")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("init", "coverage", "verify"):
+    for name in ("init", "coverage", "verify", "recover-worker"):
         commands.add_parser(name)
     reset = commands.add_parser("reset-test-data")
     reset.add_argument("--confirm-test-data", action="store_true")

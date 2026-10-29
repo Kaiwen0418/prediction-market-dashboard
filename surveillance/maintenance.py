@@ -23,6 +23,7 @@ async def prune(store, days=7, limit=50000):
                 sql.Identifier(table),sql.Identifier(table),sql.Identifier('admitted_at' if table=='surveillance_wallet_profiles' else 'known_at')), (cutoff,limit))
         await c.execute('DELETE FROM surveillance_wallet_profiles WHERE NOT EXISTS(SELECT 1 FROM surveillance_cases c WHERE c.id=case_id)')
         await c.execute('DELETE FROM surveillance_dirty_bins WHERE bin_end<%s', (evidence_cutoff,))
+        await c.execute("DELETE FROM surveillance_scout WHERE bucket<now()-interval '30 minutes'")
         trades = await c.execute("""DELETE FROM surveillance_trades WHERE ctid IN (
             SELECT t.ctid FROM surveillance_trades t WHERE event_time<%s AND received_at<%s
             AND NOT EXISTS(SELECT 1 FROM surveillance_cases c WHERE c.venue=t.venue AND c.market_id=t.market_id
@@ -43,7 +44,8 @@ async def prune(store, days=7, limit=50000):
             AND NOT EXISTS (SELECT 1 FROM surveillance_cases c WHERE c.document->>'rules_raw_id'=old.raw_id)
             LIMIT %s)""", (evidence_cutoff, limit))
         deleted = await (await c.execute("""WITH refs AS (
-            SELECT unnest(raw_ids) AS id FROM surveillance_aggregates
+            SELECT unnest(metadata_raw_ids) AS id FROM surveillance_markets
+            UNION SELECT unnest(raw_ids) FROM surveillance_aggregates
             UNION SELECT unnest(raw_ids) FROM surveillance_walks
             UNION SELECT unnest(raw_ids) FROM surveillance_wallet_profiles
             UNION SELECT raw_id FROM surveillance_markets UNION SELECT raw_id FROM surveillance_rules

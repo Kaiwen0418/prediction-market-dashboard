@@ -1,16 +1,19 @@
 import asyncio
 from collections import Counter
+from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 import logging
+import signal
 
 from .collectors import Collector, ContractError
-from .discovery import Selector
+from .discovery import Selector,event_key,theme
 from .detectors import automatic_candidate
 from .investigations import replay, ReplayCapacityError
 from .maintenance import prune
 from .capacity import CapacityGuard
 from .normalization import market, trade, digest
 from .storage import Store, RawArchive
+from psycopg.types.json import Jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +43,32 @@ class Worker:
             await c.execute("""UPDATE surveillance_jobs SET checkpoint='{}',due_at=now(),lease_until=NULL,lease_token=NULL
                 WHERE id=ANY(%s) AND checkpoint->>'cursor' IS NOT NULL
                 AND NOT(checkpoint ? 'walk_started_at')""", (catalog_ids,))
+        # Repair sparse detail overwrites left by schema 1/2, through the one writer.
+        async with self.store.connection() as c:
+            await c.execute("""INSERT INTO surveillance_jobs(id,kind,venue,payload)
+                SELECT 'metadata-repair:'||m.id,'details',m.venue,
+                    jsonb_build_object('market_id',COALESCE(m.condition_id,m.id),'catalog_id',m.id,
+                        'manual',true,'reason','restore omitted catalog metadata')
+                FROM surveillance_markets m JOIN surveillance_raw r ON r.id=m.raw_id
+                WHERE m.venue='polymarket' AND m.document->'event_ids'='[]'::jsonb
+                    AND r.source ~ '/markets/[0-9]+$' LIMIT 500 ON CONFLICT DO NOTHING""")
         for venue in ("polymarket", "kalshi"):
+            await self.store.enqueue(f'wide:{venue}:v2','wide',venue,{'scope':'global'})
             await self.store.enqueue(f"schedule:{venue}", "schedule", venue, {})
+        async with self.store.connection() as c:
+            await c.execute("UPDATE surveillance_jobs SET due_at=LEAST(due_at,now()) WHERE kind='schedule'")
+            await c.execute("UPDATE surveillance_jobs SET enabled=false WHERE kind='wide' AND id NOT LIKE '%:v2'")
 
     async def schedule(self, venue):
-        selector = Selector(self.settings.contracts_per_venue, self.settings.exploration_fraction, end_grace_hours=self.settings.end_grace_hours)
+        activity=await self.store.fetch("""SELECT market_id,
+            COALESCE(sum(cash) FILTER(WHERE bucket>=date_trunc('minute',now())-interval '5 minutes'),0) AS recent_cash,
+            COALESCE(sum(cash) FILTER(WHERE bucket<date_trunc('minute',now())-interval '5 minutes'),0) AS prior_cash,
+            max(last_event) AS last_event FROM surveillance_scout
+            WHERE venue=%s AND bucket>=now()-interval '15 minutes' GROUP BY market_id""", (venue,))
+        scouts={r['market_id']:r for r in activity}
+        previous=await self.store.fetch("SELECT payload FROM surveillance_jobs WHERE venue=%s AND kind='trades' AND enabled AND NOT COALESCE((payload->>'manual')::boolean,false)",(venue,))
+        selector = Selector(self.settings.contracts_per_venue, self.settings.exploration_fraction,
+            end_grace_hours=self.settings.end_grace_hours,scouts=scouts,previous={r['payload']['market_id'] for r in previous})
         async with self.store.connection() as c:
             async with c.cursor(name="selection") as cursor:
                 cursor.itersize = 256
@@ -54,26 +78,59 @@ class Worker:
                 async for row in cursor:
                     selector.add(row["document"])
         chosen = selector.result()
-        count = (await self.store.fetch("SELECT count(*) AS n FROM surveillance_markets WHERE venue=%s", (venue,)))[0]["n"]
-        keys = []
-        for m in chosen:
-            key = m["condition_id"] or m["id"]
-            for kind in ("details", "trades", "detect"):
-                job_id = f"{kind}:{venue}:{key}"
-                keys.append(job_id)
-                await self.store.enqueue(job_id, kind, venue, {"market_id": key, "catalog_id": m["id"]})
+        # Unmapped catalog rows get bounded enrichment instead of pretending that
+        # each missing event ID denotes a different independent event.
         async with self.store.connection() as c:
-            # Disabled jobs keep checkpoints and may resume on a later rotation.
+            pending=(await (await c.execute("SELECT count(*) AS n FROM surveillance_jobs WHERE venue=%s AND enabled AND payload->>'lookup'='true'",(venue,))).fetchone())['n']
+            for _,m in selector.unmapped.items[:min(10,max(0,20-pending))]:
+                key=m.get('condition_id') or m['id']
+                await c.execute("""INSERT INTO surveillance_jobs(id,kind,venue,payload) VALUES(%s,'details',%s,%s)
+                    ON CONFLICT DO NOTHING""",('lookup:'+venue+':'+key,venue,Jsonb(dict(market_id=key,
+                    lookup=True,manual=True,trigger='unmapped_exploration',reason='one-off native event metadata resolution'))))
+        count = (await self.store.fetch("SELECT count(*) AS n FROM surveillance_markets WHERE venue=%s", (venue,)))[0]["n"]
+        rows=[]
+        for m in chosen:
+            key=m['condition_id'] or m['id']
+            for kind in ('details','trades','detect'):
+                rows.append((f'{kind}:{venue}:{key}',kind,venue,Jsonb(dict(market_id=key,
+                    catalog_id=m['id'],selection=selector.selection[m['id']]))))
+        keys=[r[0] for r in rows]
+        async with self.store.connection() as c:
+            async with c.cursor() as cursor:
+                await cursor.executemany("""INSERT INTO surveillance_jobs(id,kind,venue,payload) VALUES(%s,%s,%s,%s)
+                    ON CONFLICT(id) DO UPDATE SET payload=EXCLUDED.payload""", rows)
             await c.execute("""UPDATE surveillance_jobs SET enabled=(id=ANY(%s)),
                 due_at=CASE WHEN NOT enabled AND id=ANY(%s) THEN now() ELSE due_at END
-                WHERE venue=%s AND kind IN ('details','trades','detect') AND NOT COALESCE((payload->>'manual')::boolean,false)""", (keys, keys, venue))
+                WHERE venue=%s AND kind IN ('details','trades','detect') AND NOT COALESCE((payload->>'manual')::boolean,false)""", (keys,keys,venue))
         await self.store.coverage(venue, "budget", {"catalog_rows": count, "selected_contracts": len(chosen),
             "budget": self.settings.contracts_per_venue, "exploration_fraction": self.settings.exploration_fraction,
+            'independent_events':len({event_key(m) for m in chosen}),
+            'theme_counts':dict(Counter(theme(m) for m in chosen)),
+            'low_activity_selected':sum(selector.selection[m['id']]['reason']=='low_activity_exploration' for m in chosen),
+            'unmapped_event_count':sum(not m.get('event_ids') for m in chosen),
+            'unmapped_catalog_candidates':selector.counts['unmapped'],
+            'recent_broad_markets':len(scouts),
+            'scout_promoted':sum(selector.selection[m['id']]['reason']=='wide_activity_promotion' for m in chosen),
             "limitations": ["Heuristic category ranking; only native within-platform event grouping available",
                              "REST only; order books and broadcast feeds not collected",
                              "Automatic catalog: active contracts only; MVE combinations excluded",
                              "Closed contracts are available through explicit detail/backfill jobs",
-                             "Expired schedule metadata excluded from deep sampling, not classified as settled"]})
+                             "Past schedule time lowers ranking; explicit source tradability controls eligibility"]})
+
+    async def resolve_unknowns(self,venue,trades):
+        amounts={}
+        for t in trades:
+            amounts[t['market_id']]=amounts.get(t['market_id'],Decimal(0))+Decimal(t['price'])*Decimal(t['quantity'])
+        keys=[k for k,v in sorted(amounts.items(),key=lambda kv:kv[1],reverse=True) if v>=1000][:20]
+        if not keys:return
+        async with self.store.connection() as c:
+            known=await (await c.execute("SELECT id,condition_id FROM surveillance_markets WHERE venue=%s AND (id=ANY(%s) OR condition_id=ANY(%s)) AND jsonb_array_length(COALESCE(document->'event_ids','[]'))>0", (venue,keys,keys))).fetchall()
+            mapped={r['condition_id'] or r['id'] for r in known}
+            pending=(await (await c.execute("SELECT count(*) AS n FROM surveillance_jobs WHERE venue=%s AND enabled AND payload->>'lookup'='true'", (venue,))).fetchone())['n']
+            for key in [k for k in keys if k not in mapped][:max(0,20-pending)]:
+                await c.execute("""INSERT INTO surveillance_jobs(id,kind,venue,payload) VALUES(%s,'details',%s,%s)
+                    ON CONFLICT DO NOTHING""", ('lookup:'+venue+':'+key,venue,Jsonb(dict(market_id=key,
+                    manual=True,lookup=True,trigger='wide_feed',reason='one-off metadata resolution; not a user investigation'))))
 
     async def ingest(self, job):
         cp = dict(job["checkpoint"])
@@ -84,11 +141,12 @@ class Worker:
                 raise ContractError("Backfill requires its detail job to complete first")
             m = rows[0]["document"]
             job["payload"] = dict(job["payload"], market_id=m["condition_id"] or m["id"])
-        if job["kind"] in ("trades", "backfill") and not cp.get("since"):
-            cp["since"] = int((datetime.now(timezone.utc) - timedelta(hours=13)).timestamp())
+        if job["kind"] in ("trades", "backfill", "wide") and not cp.get("since"):
+            horizon=timedelta(seconds=self.settings.wide_bootstrap_seconds) if job['kind']=='wide' else timedelta(hours=self.settings.deep_history_hours)
+            cp['since']=int((datetime.now(timezone.utc)-horizon).timestamp())
             await self.store.checkpoint(job, cp)
-            await self.store.coverage(job["venue"], "bootstrap_horizon", {"market_id": job["payload"]["market_id"],
-                "since": cp["since"], "older_history": "not_collected"}, job["id"])
+            await self.store.coverage(job["venue"], "bootstrap_horizon", {"market_id": job["payload"].get("market_id"),
+                "since": cp["since"], "older_history": "not_collected", "scope":job["payload"].get("scope","contract")}, job["id"])
         for _ in range(self.settings.pages_per_job):
             if not await self.capacity.check():
                 return 60
@@ -115,6 +173,8 @@ class Worker:
                 cp['walk_pages'] = cp.get('walk_pages', 0) + 1
                 cp['walk_raw_ids'] = (cp.get('walk_raw_ids', []) + [raw['id']])[:64]
                 normalized = [trade(job["venue"], r, raw["received_at"]) for r in rows]
+                if job['kind']=='wide' and normalized and cp['walk_pages']==1:
+                    cp['feed_head_at']=normalized[0]['event_time']
                 previous = cp.get("last_time")
                 counts = Counter(cp.get("counts", {}))
                 accepted = []
@@ -133,30 +193,49 @@ class Worker:
                     counts[t["identity"]] += 1
                     t["id"] = t["identity"] + (f":{counts[t['identity']]}" if job["venue"] == "polymarket" else "")
                     t["raw_id"] = raw["id"]
+                    t["collection_scope"]=job["kind"]
                     accepted.append(t)
                     high_watermark = max(high_watermark, ts)
                 cp.update(cursor=cursor, high_watermark=high_watermark, last_time=previous, counts=dict(counts))
                 cp['walk_trades'] = cp.get('walk_trades',0)+len(accepted)
+                if job['kind']=='wide':
+                    cp.update(http_cache_control=raw.get('response_headers',{}).get('cache-control'),http_age=raw.get('response_headers',{}).get('age'))
+                    cp.update(last_page_fills=len(accepted),last_page_markets=len({t['market_id'] for t in accepted}),
+                        last_page_received_at=raw['received_at'],
+                        head_event_time=datetime.fromtimestamp(high_watermark,timezone.utc).isoformat())
                 completed_walk = None
                 if exhausted or not cursor:
                     completed_walk = dict(lower_time=cp['walk_lower'], upper_time=cp['walk_upper'],
                         raw_ids=cp['walk_raw_ids'], refs_complete=cp['walk_pages']<=64,observed_trades=cp['walk_trades'])
-                    if cp.get('legacy_walk'):
+                    if cp.get('legacy_walk') or job['kind']=='wide':
                         completed_walk = None
-                    cp = {"since": max(cp["since"], high_watermark - 300), "completed_at": raw["received_at"]}
+                    overlap=self.settings.wide_overlap_seconds if job['kind']=='wide' else 300
+                    cp={"since":max(cp['since'],high_watermark-overlap),"completed_at":raw['received_at'],
+                        'high_watermark_at':datetime.fromtimestamp(high_watermark,timezone.utc).isoformat(),
+                        'last_walk_pages':cp['walk_pages'],'last_walk_fills':cp['walk_trades'],
+                        'first_page_received_at':cp['walk_upper'],
+                        'last_page_received_at':raw['received_at'],'feed_head_at':cp.get('feed_head_at'),
+                        'http_cache_control':cp.get('http_cache_control'),'http_age':cp.get('http_age')}
                     cursor = None
                 await self.store.commit_page(job, raw, cp, trades=accepted, completed_walk=completed_walk)
+                if job['kind']=='wide':
+                    await self.resolve_unknowns(job['venue'],accepted)
             if not cursor:
                 await self.store.coverage(job["venue"], "walk_completed", {"kind": job["kind"],
                     "market_id": job["payload"].get("market_id"), "checkpoint": cp,
                     "meaning": "Completed requested walk only; not proof of upstream completeness"}, job["id"])
                 if job["kind"] == "details":
                     return self.settings.detail_seconds
+                if job['kind']=='wide':
+                    return self.settings.wide_poll_seconds
                 if job["kind"] in ("trades", "backfill"):
                     return self.settings.poll_seconds
                 return self.settings.closed_catalog_seconds if job["payload"].get("closed") else self.settings.catalog_seconds
         await self.store.coverage(job["venue"], "walk_pending", {"kind": job["kind"],
-            "reason": "page budget reached", "cursor_saved": True}, job["id"])
+            "reason": "page budget reached", "cursor_saved": True,
+            "scope":job['payload'].get('scope','contract'),
+            "oldest_event_seen":cp.get('last_time'),"requested_since":cp.get('since'),
+            "note":"Cursor pending is not caught-up coverage"}, job["id"])
         return 1
 
     async def run_once(self):
@@ -243,10 +322,17 @@ class Worker:
             logger.warning("Job %s failed (%s)", job["id"], type(exc).__name__)
             await self.store.coverage(job["venue"], "error", {"error": reason, "checkpoint_preserved": True}, job["id"])
             backoff = min(3600, 60 * 2 ** min(job["failures"], 5))
+            if job['payload'].get('lookup') and job['failures']>=2:
+                async with self.store.connection() as c:
+                    await self.store.fence(c,job)
+                    await c.execute('UPDATE surveillance_jobs SET enabled=false WHERE id=%s',(job['id'],))
+                await self.store.coverage(job['venue'],'unmapped_market',{'reason':'metadata lookup failed three times; source remains unresolved'},job['id'])
             await self.store.release(job, max(backoff, getattr(exc, "retry_after", 0)), reason)
         return True
 
     async def run(self, once=False):
+        loop=asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGTERM,asyncio.current_task().cancel)
         await self.seed()
         try:
             if once:
@@ -255,4 +341,5 @@ class Worker:
                 if not await self.run_once():
                     await asyncio.sleep(1)
         finally:
+            loop.remove_signal_handler(signal.SIGTERM)
             await self.collector.close()

@@ -76,6 +76,12 @@ def create_app(settings=None):
     async def coverage():
         return await completeness(store)
 
+    @app.get('/selection')
+    async def selection():
+        return await store.fetch("""SELECT venue,payload,due_at,checkpoint FROM surveillance_jobs
+            WHERE kind='trades' AND enabled AND NOT COALESCE((payload->>'manual')::boolean,false)
+            ORDER BY venue,id""")
+
     @app.get("/markets")
     async def markets(venue: Literal["polymarket", "kalshi"], after: str = "", limit: int = Query(100, ge=1, le=1000)):
         rows = await store.fetch("SELECT document,id FROM surveillance_markets WHERE venue=%s AND id>%s ORDER BY id LIMIT %s",
@@ -196,6 +202,6 @@ def create_app(settings=None):
                 raise HTTPException(404, "Evidence not found")
             content = RawArchive.read(r)
         return {"id": raw_id, "sha256": r["sha256"], "source": r["source"], "params": r["params"],
-                "received_at": r["received_at"], "status": r["status"], "body": content.decode("utf-8", errors="replace")}
+                "received_at": r["received_at"], "status": r["status"], "response_headers":r.get("response_headers",{}), "body": content.decode("utf-8", errors="replace")}
 
     return app

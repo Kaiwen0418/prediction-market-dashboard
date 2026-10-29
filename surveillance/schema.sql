@@ -90,3 +90,19 @@ CREATE INDEX IF NOT EXISTS surveillance_aggregate_raw ON surveillance_aggregates
 CREATE INDEX IF NOT EXISTS surveillance_walk_raw ON surveillance_walks USING gin(raw_ids);
 CREATE INDEX IF NOT EXISTS surveillance_profile_raw ON surveillance_wallet_profiles USING gin(raw_ids);
 INSERT INTO surveillance_schema VALUES (2) ON CONFLICT DO NOTHING;
+
+
+-- Live five-minute triage counters, never used as historical replay scores.
+CREATE TABLE IF NOT EXISTS surveillance_scout (
+ venue text NOT NULL, market_id text NOT NULL, bucket timestamptz NOT NULL,
+ known_at timestamptz NOT NULL, fills bigint NOT NULL, cash numeric NOT NULL,
+ last_event timestamptz NOT NULL, PRIMARY KEY(venue,market_id,bucket)
+);
+CREATE INDEX IF NOT EXISTS surveillance_scout_recent ON surveillance_scout(venue,bucket);
+CREATE INDEX IF NOT EXISTS surveillance_dirty_time ON surveillance_dirty_bins(bin_end);
+INSERT INTO surveillance_schema VALUES(3) ON CONFLICT DO NOTHING;
+
+ALTER TABLE surveillance_markets ADD COLUMN IF NOT EXISTS metadata_raw_ids text[] NOT NULL DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS surveillance_market_metadata_raw ON surveillance_markets USING gin(metadata_raw_ids);
+
+ALTER TABLE surveillance_raw ADD COLUMN IF NOT EXISTS response_headers jsonb NOT NULL DEFAULT '{}';

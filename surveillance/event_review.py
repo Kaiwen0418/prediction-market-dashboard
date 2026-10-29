@@ -24,16 +24,16 @@ async def enqueue_review(c, information_id, venue, as_of, contract_only=False):
 
 
 async def family(store, venue, market_id, cutoff):
-    source = await store.fetch('''SELECT document,raw_id FROM surveillance_markets WHERE venue=%s
+    source = await store.fetch('''SELECT document,raw_id,metadata_raw_ids FROM surveillance_markets WHERE venue=%s
         AND (id=%s OR condition_id=%s) AND observed_at<=%s LIMIT 1''', (venue,market_id,market_id,cutoff))
     event_ids = source[0]['document'].get('event_ids',[]) if source else []
     if len(event_ids)!=1:
         return 'contract:'+market_id, [market_id], [source[0]['raw_id']] if source else []
-    siblings = await store.fetch('''SELECT document,raw_id FROM surveillance_markets WHERE venue=%s
+    siblings = await store.fetch('''SELECT document,raw_id,metadata_raw_ids FROM surveillance_markets WHERE venue=%s
         AND observed_at<=%s AND document->'event_ids' ? %s ORDER BY id LIMIT 21''', (venue,cutoff,event_ids[0]))
     if len(siblings)>20:
         raise ValueError('Event family exceeds 20 known contracts; narrow the review before scoring')
-    return 'native-event:'+event_ids[0], sorted({r['document'].get('condition_id') or r['document']['id'] for r in siblings}), [r['raw_id'] for r in siblings]
+    return 'native-event:'+event_ids[0], sorted({r['document'].get('condition_id') or r['document']['id'] for r in siblings}), [key for r in siblings for key in [r['raw_id'],*r['metadata_raw_ids']]]
 
 
 async def build_review(store, information_id, as_of, contract_only=False):

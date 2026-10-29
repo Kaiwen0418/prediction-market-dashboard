@@ -14,7 +14,7 @@ from psycopg.types.json import Jsonb
 
 LOCK = 81724003
 DERIVED = ('surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles')
-TABLES = (*DERIVED, 'surveillance_dirty_bins', "surveillance_case_versions", "surveillance_cases", "surveillance_information",
+TABLES = ('surveillance_scout',*DERIVED, 'surveillance_dirty_bins', "surveillance_case_versions", "surveillance_cases", "surveillance_information",
           "surveillance_trades", "surveillance_rules", "surveillance_markets",
           "surveillance_raw", "surveillance_coverage")
 
@@ -63,6 +63,8 @@ async def evict_batch(c, limit=10000):
             await c.execute(sql.SQL('DELETE FROM {} WHERE raw_ids && %s').format(sql.Identifier(table)), (ids,))
         await c.execute("DELETE FROM surveillance_dirty_bins WHERE bin_end<=%s", (cutoff,))
         await c.execute("DELETE FROM surveillance_wallet_profiles WHERE NOT EXISTS(SELECT 1 FROM surveillance_cases c WHERE c.id=case_id)")
+        await c.execute('DELETE FROM surveillance_scout WHERE bucket<=%s', (cutoff,))
+        await c.execute('DELETE FROM surveillance_markets WHERE metadata_raw_ids && %s',(ids,))
         for table in ("surveillance_information", "surveillance_trades", "surveillance_rules", "surveillance_markets"):
             await c.execute(sql.SQL("DELETE FROM {} WHERE raw_id=ANY(%s)").format(sql.Identifier(table)), (ids,))
         await c.execute("DELETE FROM surveillance_raw WHERE id=ANY(%s)", (ids,))
@@ -121,7 +123,7 @@ async def enforce(store, settings, batch_limit=10000, max_batches=8):
                 n = await evict_batch(c, batch_limit)
                 count += n
                 # Derived versions also need reclamation when raw receipts are gone.
-                for table in DERIVED:
+                for table in (*DERIVED,'surveillance_scout'):
                     removed = await c.execute(sql.SQL('DELETE FROM {} WHERE ctid IN (SELECT ctid FROM {} ORDER BY {} LIMIT %s)').format(
                         sql.Identifier(table),sql.Identifier(table),sql.Identifier('admitted_at' if table=='surveillance_wallet_profiles' else 'known_at')), (batch_limit,))
                     derived_count += removed.rowcount

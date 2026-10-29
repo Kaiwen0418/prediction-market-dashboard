@@ -309,11 +309,11 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         requests = []
         def handler(request):
             requests.append((request.url.path, dict(request.url.params)))
-            if request.url.path.endswith("/markets/p1"):
+            if request.url.path.endswith("/markets") and request.url.params.get("id")=="p1":
                 return httpx.Response(200, json={"id": "p1", "conditionId": "c1", "description": "rule prose",
-                    "question": "Policy announcement", "closed": False})
+                    "question": "Policy announcement", "closed": False,"events":[{"id":"E"}]})
             return httpx.Response(200, json={"markets": [{"id": "p1", "conditionId": "c1", "description": "rule prose",
-                "question": "Policy announcement", "closed": False}], "next_cursor": None})
+                "question": "Policy announcement", "closed": False,"events":[{"id":"E"}]}], "next_cursor": None})
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         worker = Worker(self.settings, Collector(self.store, self.archive, 0, client))
         job = await self.job("catalog-test", "catalog")
@@ -325,12 +325,16 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("tokens", doc)
         await self.store.release(job, 3600)
         await worker.schedule("polymarket")
+        first = await self.store.claim()
+        self.assertEqual(first['kind'],'detect')  # Discovery remains live during rule bootstrap.
+        await self.store.release(first,3600)
         detail = await self.store.claim()
         self.assertEqual(detail["kind"], "details")
         await worker.ingest(detail)
         rules = await self.store.fetch("SELECT document FROM surveillance_rules")
         self.assertEqual(rules[0]["document"]["rules"]["description"], "rule prose")
-        self.assertEqual(requests[-1][0], "/markets/p1")
+        self.assertEqual(requests[-1][0], "/markets")
+        self.assertEqual(requests[-1][1]["id"],"p1")
         await self.store.enqueue("catalog:legacy", "catalog", "kalshi", {})
         await worker.seed()
         self.assertFalse((await self.store.fetch("SELECT enabled FROM surveillance_jobs WHERE id='catalog:legacy'"))[0]["enabled"])
@@ -372,7 +376,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import patch
         from surveillance.cli import execute
         def handler(request):
-            if request.url.path.endswith("/markets/past"):
+            if request.url.path.endswith("/markets") and request.url.params.get("id")=="past":
                 return httpx.Response(200,json={"id":"past","conditionId":"old-condition","closed":True,
                     "description":"historical rules","umaResolutionStatus":"resolved"})
             self.assertEqual(request.url.params["condition"],"old-condition")

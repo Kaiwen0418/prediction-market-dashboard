@@ -21,10 +21,10 @@ class UpstreamCooldown(ContractError):
 
 
 def unpack(venue, kind, body):
-    if not isinstance(body, dict):
+    if not isinstance(body, dict) and not (venue=="polymarket" and kind=="details" and isinstance(body,list)):
         raise ContractError("Expected response envelope")
     if kind == "details":
-        row = body if venue == "polymarket" else body.get("market")
+        row = (body[0] if isinstance(body,list) and len(body)==1 else body) if venue == "polymarket" else body.get("market")
         if not isinstance(row, dict) or not row.get("id" if venue == "polymarket" else "ticker"):
             raise ContractError("Missing market detail")
         return [row], None
@@ -67,6 +67,7 @@ class Collector:
                 self.last_request = time.monotonic()
                 response = await self.client.get(url, params=params)
             raw = await asyncio.to_thread(self.archive.write, venue, url, params, response.status_code, response.content, now())
+            raw['response_headers']={k:response.headers[k] for k in ('cache-control','age','date','cf-cache-status') if k in response.headers}
             await self.store.raw(raw)
             if response.status_code not in (429, 500, 502, 503, 504) or attempt == 3:
                 response.raise_for_status()
@@ -88,10 +89,16 @@ class Collector:
         if kind == "details":
             key = str(payload.get("catalog_id") or payload["market_id"])
             base = "https://gamma-api.polymarket.com/markets/" if venue == "polymarket" else "https://external-api.kalshi.com/trade-api/v2/markets/"
-            raw, body = await self.get(venue, base + quote(key, safe=""), {})
+            # Gamma's filtered list includes events/tags omitted by /markets/{id}.
+            if venue=='polymarket':
+                raw,body=await self.get(venue,'https://gamma-api.polymarket.com/markets',
+                    {'condition_ids' if payload.get('lookup') else 'id':key,'include_tag':'true'})
+            else:
+                raw, body = await self.get(venue, base + quote(key, safe=""), {})
             rows, _ = unpack(venue, kind, body)
             actual = str(rows[0]["id" if venue == "polymarket" else "ticker"])
-            if actual != key:
+            expected=str(rows[0].get('conditionId')) if venue=='polymarket' and payload.get('lookup') else actual
+            if expected != key:
                 raise ContractError("Detail response belongs to another contract")
             return raw, rows, None
         if venue == "polymarket":
@@ -106,6 +113,8 @@ class Collector:
                     params.update(user=payload['wallet'], taker_only='false', limit=500,
                         start=int(datetime.fromisoformat(payload['since']).timestamp()),
                         end=int(datetime.fromisoformat(payload['cutoff']).timestamp()))
+                elif kind=='wide':
+                    params['taker_only']='true'
                 else:
                     params.update(condition=payload["market_id"], taker_only="true")
                 cursor_key = "cursor"
@@ -113,9 +122,9 @@ class Collector:
             url = "https://external-api.kalshi.com/trade-api/v2/markets"
             if kind == "catalog" and payload.get("scope") == "active-v2":
                 params.update(status="open", mve_filter="exclude")
-            if kind in ("trades", "backfill"):
+            if kind in ("trades", "backfill", "wide"):
                 url += "/trades"
-                params["ticker"] = payload["market_id"]
+                if kind!='wide':params["ticker"] = payload["market_id"]
                 # Pin min_ts for the entire cursor walk. Replay the boundary second.
                 if cp.get("since"):
                     params["min_ts"] = cp["since"]

@@ -66,7 +66,7 @@ class CoreTests(unittest.TestCase):
 
     def test_budget_includes_quiet_exploration(self):
         markets = [dict(id=str(i), venue="kalshi", condition_id=None, closed=False, title="Policy announcement" if i < 100 else "quiet",
-                        volume="100000" if i < 100 else "0") for i in range(200)]
+                        volume="100000" if i < 100 else "0",event_ids=[str(i)]) for i in range(200)]
         chosen = select(markets, 20, 0.2, T)
         self.assertEqual(len(chosen), 20)
         self.assertEqual(len({m["id"] for m in chosen}), 20)
@@ -119,9 +119,9 @@ class CoreTests(unittest.TestCase):
             self.assertNotEqual(first["received_at"], second["received_at"])
             self.assertEqual(len(list(Path(folder).rglob("*.parquet"))), 1)
 
-    def test_lifecycle_and_stale_schedule_do_not_enter_deep_pool(self):
+    def test_lifecycle_blocks_but_delayed_tradable_events_remain_eligible(self):
         base = {"id": "p", "conditionId": "c", "question": "Policy announcement", "closed": False,
-                "active": True, "acceptingOrders": True}
+                "active": True, "acceptingOrders": True,"events":[{"id":"E"}]}
         live = market("polymarket", base, T.isoformat())
         fixtures = [live,
             market("polymarket", dict(base, id="resolved", umaResolutionStatus="resolved"), T.isoformat()),
@@ -130,7 +130,7 @@ class CoreTests(unittest.TestCase):
             market("polymarket", dict(base, id="stale", endDate=(T-timedelta(days=30)).isoformat()), T.isoformat()),
             market("kalshi", {"ticker": "KXMVE1", "event_ticker": "e", "status": "active"}, T.isoformat()),
             market("kalshi", {"ticker": "new", "event_ticker": "e", "status": "initialized"}, T.isoformat())]
-        self.assertEqual([m["id"] for m in select(fixtures,20,.2,T)], ["p"])
+        self.assertEqual({m["id"] for m in select(fixtures,20,.2,T)}, {"p","stale"})
         self.assertFalse(fixtures[4]["settled"])  # Expired schedule is not a settlement assertion.
 
     def test_cash_floor_does_not_confuse_shares_with_money_or_filter_sell_signals(self):
@@ -145,7 +145,7 @@ class CoreTests(unittest.TestCase):
 
     def test_polymarket_combo_eligibility_does_not_hide_individual_markets(self):
         m=market('polymarket',{'id':'sport','conditionId':'c','question':'Match winner',
-            'comboStatus':'enabled','active':True,'acceptingOrders':True},T.isoformat())
+            'comboStatus':'enabled','active':True,'acceptingOrders':True,'events':[{'id':'E'}]},T.isoformat())
         self.assertFalse(m['is_combo'])
         self.assertEqual(m['combo_eligibility_status'],'enabled')
         self.assertEqual([x['id'] for x in select([m],20,.2,T)],['sport'])

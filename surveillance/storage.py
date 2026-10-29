@@ -86,7 +86,7 @@ class Store:
             return await (await c.execute("""
                 UPDATE surveillance_jobs SET lease_until=now()+interval '5 minutes', lease_token=%s
                 WHERE id=(SELECT id FROM surveillance_jobs WHERE enabled AND due_at<=now()
-                    AND (lease_until IS NULL OR lease_until<now()) ORDER BY due_at,CASE kind WHEN 'details' THEN 0 ELSE 1 END,id
+                    AND (lease_until IS NULL OR lease_until<now()) ORDER BY CASE kind WHEN 'wide' THEN 0 WHEN 'schedule' THEN 1 WHEN 'aggregates' THEN 2 WHEN 'detect' THEN 3 ELSE 4 END,due_at,CASE kind WHEN 'details' THEN 0 ELSE 1 END,id
                     FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *
             """, (token,))).fetchone()
 
@@ -110,9 +110,9 @@ class Store:
 
     @staticmethod
     async def insert_raw(c, r):
-        await c.execute("""INSERT INTO surveillance_raw VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+        await c.execute("""INSERT INTO surveillance_raw(id,venue,source,params,received_at,status,sha256,path,response_headers) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT DO NOTHING""", (r["id"], r["venue"], r["source"], Jsonb(r["params"]), r["received_at"],
-                                       r["status"], r["sha256"], r["path"]))
+                                       r["status"], r["sha256"], r["path"],Jsonb(r.get("response_headers",{}))))
 
     async def coverage(self, venue, kind, document, job_id=None):
         async with self.connection() as c:
@@ -131,10 +131,19 @@ class Store:
             for m in markets:
                 # The hot catalog is an index, never a second copy of rule prose.
                 index = {k: v for k, v in m.items() if k not in ("rules", "tokens")}
-                await c.execute("""INSERT INTO surveillance_markets VALUES(%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT(venue,id) DO UPDATE SET document=EXCLUDED.document,
-                    condition_id=EXCLUDED.condition_id,observed_at=EXCLUDED.observed_at,raw_id=EXCLUDED.raw_id""",
-                    (m["venue"], m["id"], m["condition_id"], Jsonb(index), m["observed_at"], raw["id"]))
+                fields=('event_ids','tags','category','sports_market_type','series_ticker','volume_24h','liquidity','volume','volume_reported')
+                index['field_sources']={k:dict(raw_id=raw['id'],observed_at=raw['received_at'])
+                    for k in m.get('metadata_fields',[]) if k in fields}
+                legacy=','.join("'"+k+"',CASE WHEN surveillance_markets.raw_id IS NOT NULL AND surveillance_markets.document->'"+k+"' IS NOT NULL AND surveillance_markets.document->'"+k+"' NOT IN ('null'::jsonb,'[]'::jsonb) THEN jsonb_build_object('raw_id',surveillance_markets.raw_id,'observed_at',surveillance_markets.observed_at) ELSE NULL END" for k in fields)
+                merged=f"(COALESCE(surveillance_markets.document->'field_sources',jsonb_strip_nulls(jsonb_build_object({legacy})))||(EXCLUDED.document->'field_sources'))"
+                preserved=','.join("'"+k+"',CASE WHEN EXCLUDED.document->'metadata_fields' ? '"+k+"' THEN EXCLUDED.document->'"+k+"' ELSE surveillance_markets.document->'"+k+"' END" for k in fields)
+                await c.execute(f"""INSERT INTO surveillance_markets(venue,id,condition_id,document,observed_at,raw_id,metadata_raw_ids)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(venue,id) DO UPDATE
+                    SET document=EXCLUDED.document||jsonb_build_object({preserved},'field_sources',{merged}),
+                    condition_id=EXCLUDED.condition_id,observed_at=EXCLUDED.observed_at,raw_id=EXCLUDED.raw_id,
+                    metadata_raw_ids=ARRAY(SELECT DISTINCT value->>'raw_id' FROM jsonb_each({merged}))""",
+                    (m['venue'],m['id'],m['condition_id'],Jsonb(index),m['observed_at'],raw['id'],
+                     [raw['id']] if index['field_sources'] else []))
                 if detailed:
                     # Only selected contracts/manual investigations get rule versions.
                     rule_document = {k: m[k] for k in ("venue", "id", "title", "category", "tags", "rules", "observed_at")}
@@ -154,13 +163,29 @@ class Store:
                 checkpoint["expired_unseen_index_rows"] = expired.rowcount
                 checkpoint["expiry_meaning"] = "Absent from completed active walk; not proof of settlement; case/manual references retained"
             if trades:
-                async with c.cursor() as cursor:
-                    await cursor.executemany("""INSERT INTO surveillance_trades VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT DO NOTHING""", [(t["venue"], t["id"], t["market_id"], t["outcome"], t["event_time"],
-                                                   t["received_at"], Jsonb(t), raw["id"]) for t in trades])
-            if trades:
-                from .aggregates import dirty
-                await dirty(c, trades)
+                # Set-based insertion returns only new fills, so replayed/global pages
+                # cannot inflate live scout counters or dirty every duplicate bucket.
+                inserted=await (await c.execute("""INSERT INTO surveillance_trades
+                    SELECT t.venue,t.id,t.market_id,t.outcome,t.event_time,t.received_at,t.document,%s
+                    FROM jsonb_to_recordset(%s) AS t(venue text,id text,market_id text,outcome text,
+                        event_time timestamptz,received_at timestamptz,document jsonb)
+                    ON CONFLICT DO NOTHING RETURNING document""", (raw['id'],Jsonb([
+                    {**{k:t[k] for k in ('venue','id','market_id','outcome','event_time','received_at')},'document':t} for t in trades])))).fetchall()
+                new=[r['document'] for r in inserted]
+                if new:
+                    from .aggregates import dirty
+                    await dirty(c,new)
+                    await c.execute("""INSERT INTO surveillance_scout
+                        SELECT t->>'venue',t->>'market_id',
+                            to_timestamp(floor(extract(epoch FROM (t->>'event_time')::timestamptz)/300)*300),
+                            now(),count(*),sum((t->>'price')::numeric*(t->>'quantity')::numeric),
+                            max((t->>'event_time')::timestamptz)
+                        FROM jsonb_array_elements(%s) t
+                        WHERE t->>'collection_scope'='wide' AND (t->>'event_time')::timestamptz>=now()-interval '15 minutes'
+                            AND (t->>'event_time')::timestamptz<=now()+interval '30 seconds'
+                        GROUP BY 1,2,3 ON CONFLICT(venue,market_id,bucket) DO UPDATE
+                        SET fills=surveillance_scout.fills+EXCLUDED.fills,cash=surveillance_scout.cash+EXCLUDED.cash,
+                            known_at=now(),last_event=GREATEST(surveillance_scout.last_event,EXCLUDED.last_event)""",(Jsonb(new),))
             if completed_walk:
                 from .aggregates import record_walk
                 await record_walk(c, job, completed_walk)

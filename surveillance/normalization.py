@@ -71,7 +71,19 @@ def market(venue, row, received_at):
         settled = status in ("settled", "finalized") or bool(row.get("result"))
         tradable = status in ("open", "active") and not settled
         combo = bool(row.get("mve_collection_ticker")) or key.startswith("KXMVE")
-    return dict(result, venue=venue, rules=rules, rules_hash=digest(rules), observed_at=received_at,
+    # Presence and per-field receipts prevent sparse detail responses from erasing
+    # rich catalog metadata. Explicit empty values still represent an observation.
+    source_fields = {'event_ids':'events','tags':'tags','category':'category','sports_market_type':'sportsMarketType',
+                     'volume_24h':'volume24hr','liquidity':'liquidityNum'} if venue=='polymarket' else {
+                     'event_ids':'event_ticker','category':'category','series_ticker':'series_ticker','volume_24h':'volume_24h_fp'}
+    volume_key=('volumeNum' if 'volumeNum' in row else 'volume') if venue=='polymarket' else 'volume_fp'
+    source_fields.update(volume=volume_key,volume_reported=volume_key)
+    result['volume_reported']=any(k in row and row[k] is not None for k in ('volume','volumeNum','volume_fp'))
+    result.update(sports_market_type=row.get('sportsMarketType'),series_ticker=row.get('series_ticker'),
+                  volume_24h=number(row[source_fields['volume_24h']]) if row.get(source_fields['volume_24h']) is not None else None,
+                  liquidity=number(row['liquidityNum']) if row.get('liquidityNum') is not None else None)
+    metadata_fields=[k for k,v in source_fields.items() if v in row]
+    return dict(result, metadata_fields=metadata_fields, venue=venue, rules=rules, rules_hash=digest(rules), observed_at=received_at,
                 source_status=status, settled=settled, tradable=bool(tradable), is_combo=combo,
                 settlement_result=row.get("result"), combo_eligibility_status=row.get("comboStatus") if venue == "polymarket" else None,
                 source_updated_at=row.get("updated_time") or row.get("updatedAt"))
@@ -89,8 +101,11 @@ def trade(venue, row, received_at):
                       direction=1 if side == "BUY" else -1, transaction_hash=row["transaction_hash"],
                       identity_quality="execution_fingerprint_with_scan_multiplicity")
         # Public v2 rows lack a fill id: transaction hash alone is NOT unique.
-        identity = digest({k: result[k] for k in ("market_id", "token_id", "price", "quantity", "event_time",
-                                                 "wallet", "direction", "transaction_hash")})
+        identity_fields={k:result[k] for k in ("market_id","token_id","price","quantity","event_time",
+                                                  "wallet","direction","transaction_hash")}
+        for k in ('price','quantity'):
+            identity_fields[k]=format(Decimal(identity_fields[k]).normalize(),'f')
+        identity=digest(identity_fields)
     else:
         outcome = row.get("taker_outcome_side") or row.get("taker_side")
         if outcome not in ("yes", "no", None):
