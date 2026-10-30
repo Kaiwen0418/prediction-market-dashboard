@@ -354,5 +354,179 @@
         "maintenance.py": "b136c71c3880e3bccde368b716938170e39cf1ad9e48413dd83930d6e2c037de"
       }
     }
+  ],
+  "post_repair_runtime": {
+    "health": {
+      "status": "ok",
+      "collection_mode": "REST",
+      "trading": false
+    },
+    "last_receipts": [
+      {
+        "venue": "polymarket",
+        "last_receipt": "2026-10-30 09:37:23.447609+00:00"
+      },
+      {
+        "venue": "kalshi",
+        "last_receipt": "2026-10-30 09:37:39.631821+00:00"
+      }
+    ],
+    "active_queries": [
+      {
+        "elapsed": "0:00:00.035163",
+        "template": "INSERT INTO surveillance_trades\n                    SELECT t.venue,t.id,t.market_id,t.outcome,t.event_time,t.received_at,t.document,$1\n                    FROM "
+      }
+    ],
+    "capacity": [
+      {
+        "updated_at": "2026-10-30 09:37:38.675540+00:00",
+        "document": {
+          "mode": "indexed FIFO; reusable heap pages counted; bounded ordinary vacuum",
+          "error": null,
+          "before": {
+            "raw_bytes": 711778684,
+            "database_bytes": 18763495091,
+            "database_used_bytes": 14198547343,
+            "reusable_database_bytes": 4564947748
+          },
+          "blocked": false,
+          "raw_bytes": 698799744,
+          "reclaiming": true,
+          "error_phase": null,
+          "indexed_cases": 0,
+          "raw_max_bytes": 5368709120,
+          "database_bytes": 18763716275,
+          "compacted_table": null,
+          "elapsed_seconds": 11.930495874024928,
+          "evicted_receipts": 500,
+          "database_max_bytes": 21474836480,
+          "database_used_bytes": 14063969343,
+          "next_compaction_after": 0,
+          "reusable_database_bytes": 4699746932
+        }
+      }
+    ],
+    "restart_gaps": [
+      {
+        "venue": "kalshi",
+        "document": {
+          "meaning": "Explicit collection gap after stuck capacity cleanup; existing data retained, no zero-filled history",
+          "restart_requested_at": "2026-10-30T09:27:14.705332+00:00",
+          "last_retained_receipt": "2026-10-30T02:11:43.831388+00:00",
+          "deep_bootstrap_seconds": 3600,
+          "wide_bootstrap_seconds": 300,
+          "automatic_backlog_skipped": true
+        }
+      },
+      {
+        "venue": "polymarket",
+        "document": {
+          "meaning": "Explicit collection gap after stuck capacity cleanup; existing data retained, no zero-filled history",
+          "restart_requested_at": "2026-10-30T09:27:14.705332+00:00",
+          "last_retained_receipt": "2026-10-30T02:11:37.306687+00:00",
+          "deep_bootstrap_seconds": 3600,
+          "wide_bootstrap_seconds": 300,
+          "automatic_backlog_skipped": true
+        }
+      }
+    ],
+    "source_sha256": {
+      "capacity.py": "62d729f5221fb96837a97aa949dc2173ba49e205dfa603c0dfb35c2361210f66",
+      "storage.py": "d8b55153c4b6c6324da3f98cabb7e798b6cf1f2345c7afd655dc0ba3c754b426",
+      "schema.sql": "b5009ea8b3691baaa99401d3f0084fe2d624caa27c286d6e1d66a2577028e2b4",
+      "maintenance.py": "b136c71c3880e3bccde368b716938170e39cf1ad9e48413dd83930d6e2c037de",
+      "api.py": "3f7e6b5d2c801cf6a5c15ede737f4f766412f02f3c7f38b0058e5791f873d1a5"
+    }
+  },
+  "post_repair_load_samples": [
+    {
+      "at": "2026-10-30T09:36:50.588433+00:00",
+      "elapsed": 0.0001605539582669735,
+      "cpu_usage_usec": {
+        "prediction-market-postgres-1": 58198626227,
+        "prediction-market-surveillance-worker-1": 29474326
+      },
+      "package_c": [
+        55.0
+      ]
+    },
+    {
+      "at": "2026-10-30T09:37:00.589743+00:00",
+      "elapsed": 10.001490770373493,
+      "cpu_usage_usec": {
+        "prediction-market-postgres-1": 58204268948,
+        "prediction-market-surveillance-worker-1": 32895404
+      },
+      "package_c": [
+        55.0
+      ]
+    },
+    {
+      "at": "2026-10-30T09:37:10.590749+00:00",
+      "elapsed": 20.002494927030057,
+      "cpu_usage_usec": {
+        "prediction-market-postgres-1": 58205769144,
+        "prediction-market-surveillance-worker-1": 33926484
+      },
+      "package_c": [
+        53.0
+      ]
+    },
+    {
+      "at": "2026-10-30T09:37:20.591343+00:00",
+      "elapsed": 30.00306785106659,
+      "cpu_usage_usec": {
+        "prediction-market-postgres-1": 58207288030,
+        "prediction-market-surveillance-worker-1": 35032964
+      },
+      "package_c": [
+        53.0
+      ]
+    },
+    {
+      "at": "2026-10-30T09:37:30.592140+00:00",
+      "elapsed": 40.003881284967065,
+      "cpu_usage_usec": {
+        "prediction-market-postgres-1": 58210485486,
+        "prediction-market-surveillance-worker-1": 36893321
+      },
+      "package_c": [
+        54.0
+      ]
+    },
+    {
+      "at": "2026-10-30T09:37:40.592839+00:00",
+      "elapsed": 50.00456510204822,
+      "cpu_usage_usec": {
+        "prediction-market-postgres-1": 58214912136,
+        "prediction-market-surveillance-worker-1": 37301668
+      },
+      "package_c": [
+        55.0
+      ]
+    },
+    {
+      "at": "2026-10-30T09:37:50.593805+00:00",
+      "elapsed": 60.00553150428459,
+      "cpu_usage_usec": {
+        "prediction-market-postgres-1": 58221129064,
+        "prediction-market-surveillance-worker-1": 40935385
+      },
+      "package_c": [
+        55.0
+      ]
+    },
+    {
+      "summary": true,
+      "seconds": 60.005586051382124,
+      "cpu_one_core_percent": {
+        "prediction-market-postgres-1": 37.5,
+        "prediction-market-surveillance-worker-1": 19.1
+      },
+      "package_c_min": 53.0,
+      "package_c_max": 55.0,
+      "package_c_mean": 54.29,
+      "new_package_throttles": 0
+    }
   ]
 }
