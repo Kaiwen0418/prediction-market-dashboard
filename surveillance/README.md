@@ -395,3 +395,44 @@ Historical `research.study` intentionally runs frozen v1.1 from
 `research/legacy_detector.py`; archived study results are not v2.0 validation.
 Run `python -m surveillance.research.benchmark_signals` in the API container for an
 isolated 200,000-cell and 50,000-fill cost probe.
+
+
+## Bounded capacity recovery (schema 5)
+
+Case writes maintain GIN-indexed receipt and observation reference arrays; older
+case versions retain their accumulated pins. Legacy cases backfill in 100-row
+transactions. FIFO dependency lookup no longer scans the whole trade table for
+each case. Large array predicates explicitly use bitmap indexes within that
+transaction: PostgreSQL can otherwise underestimate array-comparison CPU and
+choose a primary-key scan. Legacy fill-only dossiers resolve receipt IDs using
+the `(venue,id)` trade primary key.
+
+Normal cleanup handles at most 500 oldest receipts per minute. Statements time out
+after 15s, lock acquisition after 1s, and cleanup failures back off for five minutes
+with the failed SQL template recorded (no bound parameters). The 15–20s pass
+budget is cooperative between statements, not a total hard deadline. The exclusive
+evidence lock covers reference deletion and orphan-file removal; it is released
+before ordinary VACUUM and space measurements so API reads can proceed.
+Ordinary Store transactions have a 30s statement / 2s lock timeout; API exhaustion
+returns retryable HTTP 503.
+
+`database_bytes` remains allocated physical bytes. `database_used_bytes` deducts
+reusable heap/TOAST free space estimated by PostgreSQL `pgstattuple_approx`; index
+bytes are conservatively charged in full. These estimates are refreshed by the
+capacity worker and cached for at most 120s. Active-space 80%/60% hysteresis avoids
+repeatedly discarding data merely because PostgreSQL reuses allocated files.
+The physical 20 GiB admission ceiling and raw-file 5 GiB budget remain.
+
+Routine cleanup vacuums only changed tables and does not rewrite every table.
+At the physical admission ceiling, one table with >=128 MiB estimated free space
+may be compacted: 45s timeout, at most one attempt per hour. Failure rolls back
+and leaves admission blocked where the budget is exceeded; it cannot silently
+turn into an hours-long rewrite. WAL, images and temporary rewrite space still
+need filesystem headroom outside the admission budget.
+
+`python -m surveillance.research.capacity_probe --repair` is an explicit controlled
+repair/probe for a stopped collection worker. It backfills legacy pins, validates
+the real dependency plan and performs bounded recovery passes. It modifies the
+test dataset and is not a background benchmark. The 2026-10-30 repair recorded
+the collection gap and restarted automatic trade cursors at their ordinary warmup
+horizons; manual backfill jobs were preserved.

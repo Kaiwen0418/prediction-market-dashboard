@@ -4,7 +4,8 @@ import hmac
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, JSONResponse
+from psycopg.errors import LockNotAvailable, QueryCanceled
 from pydantic import BaseModel, Field, HttpUrl
 from psycopg.types.json import Jsonb
 
@@ -59,6 +60,11 @@ def create_app(settings=None):
             raise HTTPException(503, "Capacity watermark reached; automatic eviction pending", headers={"Retry-After": "60"})
 
     app = FastAPI(title="Market Surveillance", lifespan=lifespan, dependencies=[Depends(authorized)])
+
+    @app.exception_handler(LockNotAvailable)
+    @app.exception_handler(QueryCanceled)
+    async def database_budget_exhausted(request,exc):
+        return JSONResponse(status_code=503,content={'detail':'Database maintenance or query time budget; retry shortly'},headers={'Retry-After':'5'})
 
     @app.get("/capacity")
     async def capacity_status():

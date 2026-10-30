@@ -131,3 +131,40 @@ CREATE TABLE IF NOT EXISTS surveillance_wallet_events (
 CREATE INDEX IF NOT EXISTS surveillance_wallet_events_raw ON surveillance_wallet_events USING gin(raw_ids);
 CREATE INDEX IF NOT EXISTS surveillance_trade_wallet ON surveillance_trades(venue,(document->>'wallet'),event_time);
 INSERT INTO surveillance_schema VALUES(4) ON CONFLICT DO NOTHING;
+
+-- Small indexed provenance arrays replace correlated scans over the full tape.
+ALTER TABLE surveillance_cases ADD COLUMN IF NOT EXISTS evidence_raw_ids text[] NOT NULL DEFAULT '{}';
+ALTER TABLE surveillance_cases ADD COLUMN IF NOT EXISTS evidence_observation_ids text[] NOT NULL DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS surveillance_cases_evidence_observation ON surveillance_cases USING gin(evidence_observation_ids);
+ALTER TABLE surveillance_cases ADD COLUMN IF NOT EXISTS evidence_indexed boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS surveillance_cases_created ON surveillance_cases(created_at);
+CREATE INDEX IF NOT EXISTS surveillance_cases_evidence_raw ON surveillance_cases USING gin(evidence_raw_ids);
+CREATE INDEX IF NOT EXISTS surveillance_cases_unindexed ON surveillance_cases(id) WHERE NOT evidence_indexed;
+CREATE OR REPLACE FUNCTION surveillance_index_case_evidence() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE refs text[];
+BEGIN
+    SELECT ARRAY(SELECT DISTINCT r FROM (
+        SELECT NEW.document->>'rules_raw_id' AS r
+        UNION ALL SELECT jsonb_array_elements_text(COALESCE(NEW.document->'replay_raw_ids','[]'))
+        UNION ALL SELECT value#>>'{}' FROM jsonb_path_query(NEW.document,'$.**.raw_id') value
+    ) candidates WHERE r IS NOT NULL) INTO refs;
+    -- Only legacy documents without explicit raw provenance need fill-ID lookup.
+    IF jsonb_array_length(COALESCE(NEW.document->'replay_raw_ids','[]'))=0 THEN
+        SELECT refs||ARRAY(SELECT DISTINCT t.raw_id FROM
+            jsonb_array_elements_text(COALESCE(NEW.document->'replay_input_ids','[]')) rid
+            JOIN surveillance_trades t ON t.venue=NEW.venue AND t.id=rid.value) INTO refs;
+    END IF;
+    NEW.evidence_observation_ids=ARRAY(SELECT jsonb_array_elements_text(COALESCE(NEW.document->'observation_ids','[]')));
+    IF TG_OP='UPDATE' THEN
+        refs=refs||OLD.evidence_raw_ids;
+        NEW.evidence_observation_ids=NEW.evidence_observation_ids||OLD.evidence_observation_ids;
+    END IF;
+    NEW.evidence_observation_ids=ARRAY(SELECT DISTINCT rid FROM unnest(NEW.evidence_observation_ids) rid);
+    SELECT ARRAY(SELECT DISTINCT r FROM unnest(refs) r WHERE r IS NOT NULL) INTO NEW.evidence_raw_ids;
+    NEW.evidence_indexed=true;
+    RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS surveillance_case_evidence ON surveillance_cases;
+CREATE TRIGGER surveillance_case_evidence BEFORE INSERT OR UPDATE OF document ON surveillance_cases
+    FOR EACH ROW EXECUTE FUNCTION surveillance_index_case_evidence();
+INSERT INTO surveillance_schema VALUES(5) ON CONFLICT DO NOTHING;
