@@ -436,3 +436,33 @@ the real dependency plan and performs bounded recovery passes. It modifies the
 test dataset and is not a background benchmark. The 2026-10-30 repair recorded
 the collection gap and restarted automatic trade cursors at their ordinary warmup
 horizons; manual backfill jobs were preserved.
+
+
+## Receipt-complete wallet rollups and busy-market replay (schema 6)
+
+Schema 6 replaces the 200,000-cell admission cap and 64-receipt cell references.
+Every eligible, attributed Polymarket fill contributes once through its first
+receipt, with a transactional processed-receipt ledger. Compact per-receipt wallet
+contributions back `surveillance_wallet_daily`, now a derived view. FIFO retracts
+only expired receipt contributions; newer fills in the same wallet/day cell
+survive. The existing 20 GiB database / 5 GiB raw budgets still expire history.
+No full-platform or complete seven-day history is implied. Future-dated source
+records are retained, while accumulation candidates require their last event to
+be no later than the actual evaluation time.
+
+Legacy capped summaries are rebuilt from retained normalized fills, newest first,
+up to 50 receipts and a cooperative two-second work budget per pass. Receipt
+application is idempotent and atomic with its ledger. Live ingestion continues;
+slow-accumulation generation waits for rebuild completion. Former capped-summary
+cases are versioned as superseded, preserving original detection/review state.
+The rebuild cannot recover expired/unobserved fills. Status includes receipt
+counts, version and rebuild checkpoint; raw-reference budgets for case creation
+remain explicit, rather than producing an unpinned dossier.
+
+A busy market exceeding 50,000 fills over 13h retries complete 65-minute and
+13-minute horizons for shorter windows, then a seven-minute horizon for the
+minimum six observed one-minute baseline windows. Coverage is clipped to the
+actually read horizon; unread buckets remain unknown. Dossiers/checkpoints expose
+`omitted_windows_seconds` and `replay_horizon_minutes`. A skipped one-hour window
+is never scored using a truncated tape. If even the minimum horizon exceeds the
+budget, the explicit replay-capacity error remains.

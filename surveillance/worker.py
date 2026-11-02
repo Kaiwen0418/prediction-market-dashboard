@@ -44,6 +44,8 @@ class Worker:
             await c.execute("""UPDATE surveillance_jobs SET checkpoint='{}',due_at=now(),lease_until=NULL,lease_token=NULL
                 WHERE id=ANY(%s) AND checkpoint->>'cursor' IS NOT NULL
                 AND NOT(checkpoint ? 'walk_started_at')""", (catalog_ids,))
+        async with self.store.connection() as c:
+            await c.execute("UPDATE surveillance_jobs SET due_at=now(),failures=0,last_error=NULL WHERE enabled AND kind IN ('detect','scout_detect') AND last_error LIKE 'ReplayCapacityError:%'")
         # Repair sparse detail overwrites left by schema 1/2, through the one writer.
         async with self.store.connection() as c:
             await c.execute("""INSERT INTO surveillance_jobs(id,kind,venue,payload)
@@ -53,6 +55,7 @@ class Worker:
                 FROM surveillance_markets m JOIN surveillance_raw r ON r.id=m.raw_id
                 WHERE m.venue='polymarket' AND m.document->'event_ids'='[]'::jsonb
                     AND r.source ~ '/markets/[0-9]+$' LIMIT 500 ON CONFLICT DO NOTHING""")
+        await self.store.enqueue('wallet-rollup-backfill:v6','wallet_rollup_backfill','polymarket',{})
         await self.store.enqueue('slow-wallets','slow_wallets','polymarket',{})
         await self.store.enqueue('wallet-results','wallet_results','polymarket',{})
         await self.store.enqueue('cash-v2-bootstrap','cash_bootstrap','system',{})
@@ -322,6 +325,10 @@ class Worker:
                 from .screening import scan
                 await self.store.checkpoint(job,await scan(self.store,job['venue']))
                 delay=60
+            elif job['kind']=='wallet_rollup_backfill':
+                from .longitudinal import backfill_daily
+                await backfill_daily(self.store,job)
+                delay=1
             elif job['kind']=='slow_wallets':
                 from .longitudinal import find_accumulations
                 await self.store.checkpoint(job,await find_accumulations(self.store))
@@ -339,7 +346,8 @@ class Worker:
                 knowledge=datetime.now(timezone.utc)
                 event_cutoff=await latest_cutoff(self.store,job['venue'],knowledge,job['payload']['market_id'])
                 as_of=event_cutoff.isoformat()
-                cases = await replay(self.store, job["venue"], job["payload"]["market_id"], as_of,persist=False,max_trades=self.settings.replay_max_trades,knowledge_cutoff=knowledge.isoformat())
+                replay_info={}
+                cases = await replay(self.store, job["venue"], job["payload"]["market_id"], as_of,persist=False,max_trades=self.settings.replay_max_trades,knowledge_cutoff=knowledge.isoformat(),diagnostics=replay_info)
                 new_cases = 0
                 eligible_cases = [case for case in cases if automatic_candidate(case["signal"], self.settings.automatic_min_cash_usd)]
                 for case in eligible_cases:
@@ -349,7 +357,7 @@ class Worker:
                     if created:
                         from .wallets import admit_profile
                         await admit_profile(self.store, case)
-                await self.store.checkpoint(job, {"as_of": as_of, "detected": len(cases),
+                await self.store.checkpoint(job, {**replay_info,"as_of": as_of, "detected": len(cases),
                     "new_cases": new_cases, "coalesced": len(eligible_cases) - new_cases,
                     "suppressed_by_cost_or_coverage": len(cases) - len(eligible_cases),
                     "suppressed_by_cost_floor":sum(case["signal"]["cash_notional_usd"]<self.settings.automatic_min_cash_usd or (case["signal"]["trade_count"]<5 and case["signal"]["cash_notional_usd"]<10000) for case in cases),

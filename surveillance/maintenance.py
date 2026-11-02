@@ -17,13 +17,13 @@ async def prune(store, days=7, limit=50000):
         await c.execute("DELETE FROM surveillance_case_versions WHERE case_id=ANY(%s)", (ids,))
         await c.execute("DELETE FROM surveillance_cases WHERE id=ANY(%s)", (ids,))
         # Derived summaries are disposable under the same seven-day/capacity policy.
-        for table in ('surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles','surveillance_wallet_daily','surveillance_wallet_events'):
+        for table in ('surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles','surveillance_wallet_events'):
             from psycopg import sql
             await c.execute(sql.SQL('DELETE FROM {} WHERE ctid IN (SELECT ctid FROM {} WHERE {}<%s LIMIT %s)').format(
                 sql.Identifier(table),sql.Identifier(table),sql.Identifier('admitted_at' if table=='surveillance_wallet_profiles' else 'known_at')), (cutoff,limit))
         await c.execute('''DELETE FROM surveillance_observations o WHERE known_at<%s AND NOT EXISTS(
             SELECT 1 FROM surveillance_cases c WHERE c.document->'observation_ids' ? o.id)''',(cutoff,))
-        await c.execute("DELETE FROM surveillance_wallet_daily WHERE day<(now() AT TIME ZONE 'UTC')::date-6")
+        await c.execute("DELETE FROM surveillance_wallet_daily_parts WHERE day<(now() AT TIME ZONE 'UTC')::date-6")
         await c.execute('DELETE FROM surveillance_wallet_profiles WHERE NOT EXISTS(SELECT 1 FROM surveillance_cases c WHERE c.id=case_id)')
         await c.execute('DELETE FROM surveillance_dirty_bins WHERE bin_end<%s', (evidence_cutoff,))
         await c.execute("DELETE FROM surveillance_scout WHERE bucket<now()-interval '30 minutes'")
@@ -47,7 +47,7 @@ async def prune(store, days=7, limit=50000):
             LIMIT %s)""", (evidence_cutoff, limit))
         deleted = await (await c.execute("""WITH refs AS (
             SELECT unnest(raw_ids) AS id FROM surveillance_observations
-            UNION SELECT unnest(raw_ids) FROM surveillance_wallet_daily
+            UNION SELECT raw_id FROM surveillance_wallet_daily_parts
             UNION SELECT unnest(raw_ids) FROM surveillance_wallet_events
             UNION SELECT unnest(metadata_raw_ids) FROM surveillance_markets
             UNION SELECT unnest(raw_ids) FROM surveillance_aggregates

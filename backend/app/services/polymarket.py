@@ -2,6 +2,8 @@ import asyncio
 import json
 import re
 import time
+import zlib
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -41,41 +43,77 @@ WALLET_ADDRESS_PATTERN = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 @dataclass(frozen=True)
 class CachedJsonResponse:
-    payload: Any
+    encoded: bytes
     stored_at: float
+    expires_at: float
+    decoded_bytes: int
 
 
 class JsonResponseCache:
-    def __init__(self) -> None:
-        self._entries: dict[str, CachedJsonResponse] = {}
-        self._locks: WeakValueDictionary[str, asyncio.Lock] = (
-            WeakValueDictionary()
-        )
+    """Compressed JSON LRU with byte, item and lifetime budgets."""
+    def __init__(self, max_bytes: int | None = None, max_entries: int | None = None) -> None:
+        settings = get_settings()
+        self.max_bytes = max_bytes if max_bytes is not None else settings.json_cache_max_bytes
+        self.max_entries = max_entries if max_entries is not None else settings.json_cache_max_entries
+        self.max_decoded_bytes = settings.json_cache_max_decoded_bytes
+        self.max_entry_bytes = settings.json_cache_max_entry_bytes
+        self._entries: OrderedDict[str, CachedJsonResponse] = OrderedDict()
+        self._locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+        self._bytes = self._decoded_bytes = 0
+        self.evictions = self.expired = self.skipped = 0
+
+    def _remove(self, url: str) -> None:
+        item = self._entries.pop(url, None)
+        if item:
+            self._bytes -= len(item.encoded)
+            self._decoded_bytes -= item.decoded_bytes
+
+    def prune(self, now: float | None = None) -> None:
+        current = time.monotonic() if now is None else now
+        for key, entry in list(self._entries.items()):
+            if current > entry.expires_at:
+                self._remove(key)
+                self.expired += 1
 
     def get(self, url: str, max_age_seconds: float, now: float | None = None) -> Any | None:
+        current = time.monotonic() if now is None else now
+        self.prune(current)
         entry = self._entries.get(url)
-        if entry is None:
+        if entry is None or current - entry.stored_at > max_age_seconds:
             return None
-        current_time = time.monotonic() if now is None else now
-        if current_time - entry.stored_at > max_age_seconds:
-            return None
-        return entry.payload
+        self._entries.move_to_end(url)
+        return json.loads(zlib.decompress(entry.encoded))
 
-    def put(self, url: str, payload: Any, now: float | None = None) -> None:
-        if len(self._entries) >= 2_048 and url not in self._entries:
-            oldest_url = min(
-                self._entries,
-                key=lambda key: self._entries[key].stored_at,
-            )
-            self._entries.pop(oldest_url, None)
-        self._entries[url] = CachedJsonResponse(
-            payload=payload,
-            stored_at=time.monotonic() if now is None else now,
-        )
+    def put(self, url: str, payload: Any, now: float | None = None, retention_seconds: float = 3900) -> None:
+        current = time.monotonic() if now is None else now
+        self.prune(current)
+        self._remove(url)
+        raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
+        if len(raw) > self.max_entry_bytes or retention_seconds <= 0:
+            self.skipped += 1
+            return
+        encoded = zlib.compress(raw, level=1)
+        if len(encoded) > self.max_bytes or len(raw) > self.max_decoded_bytes or self.max_entries < 1:
+            self.skipped += 1
+            return
+        while self._entries and (len(self._entries) >= self.max_entries or self._bytes + len(encoded) > self.max_bytes or self._decoded_bytes + len(raw) > self.max_decoded_bytes):
+            self._remove(next(iter(self._entries)))
+            self.evictions += 1
+        self._entries[url] = CachedJsonResponse(encoded, current, current + retention_seconds, len(raw))
+        self._bytes += len(encoded)
+        self._decoded_bytes += len(raw)
+
+    def status(self, now: float | None = None) -> dict[str, int]:
+        self.prune(now)
+        return dict(entries=len(self._entries), stored_bytes=self._bytes, decoded_json_bytes=self._decoded_bytes,
+            max_bytes=self.max_bytes, max_entries=self.max_entries, max_decoded_bytes=self.max_decoded_bytes,
+            evictions=self.evictions, expired=self.expired, skipped=self.skipped)
 
     def clear(self) -> None:
         self._entries.clear()
         self._locks.clear()
+        self._bytes = self._decoded_bytes = 0
+        self.evictions = self.expired = self.skipped = 0
 
     def lock_for(self, url: str) -> asyncio.Lock:
         lock = self._locks.get(url)
@@ -139,7 +177,7 @@ async def _fetch_json_upstream(
 
         payload = response.json()
         if cache_ttl_seconds > 0:
-            json_response_cache.put(url, payload)
+            json_response_cache.put(url, payload, retention_seconds=cache_ttl_seconds + stale_if_error_seconds)
         return payload
     except HTTPException as error:
         can_use_stale = error.status_code == 429 or error.status_code >= 500

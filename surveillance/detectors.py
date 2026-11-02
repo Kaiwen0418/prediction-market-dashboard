@@ -10,7 +10,7 @@ WINDOWS=(60,300,3600)
 BASELINE_WINDOWS=12
 
 
-def evaluate(trades,as_of,*,knowledge_cutoff=None,coverage=()):
+def evaluate(trades,as_of,*,knowledge_cutoff=None,coverage=(),windows=WINDOWS):
     cutoff=datetime.fromisoformat(as_of)
     known=datetime.fromisoformat(knowledge_cutoff or as_of)
     if cutoff.tzinfo is None or known.tzinfo is None or cutoff>known:raise ValueError('Aware event cutoff <= knowledge cutoff required')
@@ -20,7 +20,7 @@ def evaluate(trades,as_of,*,knowledge_cutoff=None,coverage=()):
     stamps={t['id']:datetime.fromisoformat(t['event_time']) for t in eligible}
     premiums={t['id']:cash(t) for t in eligible}
     results=[]
-    for seconds in WINDOWS:
+    for seconds in windows:
         start=cutoff-timedelta(seconds=seconds)
         current=[];historical=[[] for _ in range(BASELINE_WINDOWS)]
         for t in eligible:

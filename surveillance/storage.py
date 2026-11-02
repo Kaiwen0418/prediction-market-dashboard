@@ -88,7 +88,7 @@ class Store:
             return await (await c.execute("""
                 UPDATE surveillance_jobs SET lease_until=now()+interval '5 minutes', lease_token=%s
                 WHERE id=(SELECT id FROM surveillance_jobs WHERE enabled AND due_at<=now()
-                    AND (lease_until IS NULL OR lease_until<now()) ORDER BY CASE kind WHEN 'wide' THEN 0 WHEN 'schedule' THEN 1 WHEN 'aggregates' THEN 2 WHEN 'candidate_scan' THEN 3 WHEN 'detect' THEN 4 WHEN 'scout_detect' THEN 4 ELSE 5 END,due_at,CASE kind WHEN 'details' THEN 0 ELSE 1 END,id
+                    AND (lease_until IS NULL OR lease_until<now()) ORDER BY CASE kind WHEN 'wide' THEN 0 WHEN 'schedule' THEN 1 WHEN 'aggregates' THEN 2 WHEN 'candidate_scan' THEN 3 WHEN 'detect' THEN 4 WHEN 'scout_detect' THEN 4 WHEN 'wallet_rollup_backfill' THEN 4 ELSE 5 END,due_at,CASE kind WHEN 'details' THEN 0 ELSE 1 END,id
                     FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *
             """, (token,))).fetchone()
 

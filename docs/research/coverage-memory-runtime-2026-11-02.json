@@ -1,0 +1,121 @@
+{
+  "catalog_refresh_sample": {
+    "at": "2026-11-02T11:19:00.897756+00:00",
+    "started_at": "2026-11-02T11:08:13.385597+00:00",
+    "cache": {
+      "entries": 75,
+      "stored_bytes": 584510,
+      "decoded_json_bytes": 4387050,
+      "max_bytes": 33554432,
+      "max_entries": 256,
+      "max_decoded_bytes": 67108864,
+      "evictions": 0,
+      "expired": 0,
+      "skipped": 0
+    },
+    "memory": {
+      "rss_bytes": 246460416,
+      "cgroup_bytes": 223911936
+    },
+    "monitoring_counts": {
+      "polymarket": {
+        "hot": 10,
+        "warm": 30,
+        "catalog": 1960
+      },
+      "kalshi": {
+        "hot": 10,
+        "warm": 30,
+        "catalog": 1746
+      }
+    },
+    "catalog_updated_at": "2026-11-02T11:18:54.515144+00:00"
+  },
+  "later_dashboard_sample": {
+    "at": "2026-11-02T11:23:52.550556+00:00",
+    "started_at": "2026-11-02T11:08:13.385597+00:00",
+    "cache": {
+      "entries": 72,
+      "stored_bytes": 578728,
+      "decoded_json_bytes": 4354326,
+      "max_bytes": 33554432,
+      "max_entries": 256,
+      "max_decoded_bytes": 67108864,
+      "evictions": 0,
+      "expired": 3,
+      "skipped": 0
+    },
+    "memory": {
+      "rss_bytes": 177590272,
+      "cgroup_bytes": 155013120
+    },
+    "monitoring_counts": {
+      "polymarket": {
+        "hot": 10,
+        "warm": 30,
+        "catalog": 1960
+      },
+      "kalshi": {
+        "hot": 10,
+        "warm": 30,
+        "catalog": 1746
+      }
+    },
+    "catalog_updated_at": "2026-11-02T11:18:54.515144+00:00"
+  },
+  "post_rebuild_status": {
+    "at": "2026-11-02 11:23:53.337779+00:00",
+    "jobs": [
+      {
+        "kind": "slow_wallets",
+        "enabled": true,
+        "checkpoint": {
+          "scope": "Seven UTC dates within retained sources; at least six hours and two observed dates",
+          "version": 6,
+          "row_limit": null,
+          "candidates": 20
+        },
+        "failures": 0,
+        "last_error": null
+      },
+      {
+        "kind": "wallet_rollup_backfill",
+        "enabled": false,
+        "checkpoint": {
+          "done": true,
+          "scope": "All eligible retained receipt fills; source expiry/feed gaps remain",
+          "version": 6,
+          "before_id": "165933dcd4684fca8e39bc6d33d7e568",
+          "before_time": "2026-11-02T00:17:14.631340+00:00",
+          "eligible_fills": 524810,
+          "processed_receipts": 915
+        },
+        "failures": 0,
+        "last_error": null
+      }
+    ],
+    "latest_receipts": [
+      {
+        "venue": "polymarket",
+        "received_at": "2026-11-02 11:23:41.104282+00:00"
+      },
+      {
+        "venue": "kalshi",
+        "received_at": "2026-11-02 11:23:50.850135+00:00"
+      }
+    ],
+    "replay_capacity_failures": {
+      "n": 0
+    },
+    "superseded_slow_cases": [
+      {
+        "superseded": "false",
+        "count": 20
+      },
+      {
+        "superseded": "true",
+        "count": 3
+      }
+    ]
+  }
+}

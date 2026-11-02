@@ -1,0 +1,21 @@
+{
+  "fixture_json_bytes": 242780,
+  "fixture_python_bytes": 759986,
+  "old_2048_independent_payload_projection_bytes": 1556451328,
+  "requests": 1200,
+  "seconds": 4.595889481250197,
+  "rss_before_kib": 52624,
+  "rss_peak_kib": 64272,
+  "cache": {
+    "entries": 256,
+    "stored_bytes": 13553408,
+    "decoded_json_bytes": 59079936,
+    "max_bytes": 33554432,
+    "max_entries": 256,
+    "max_decoded_bytes": 67108864,
+    "evictions": 944,
+    "expired": 0,
+    "skipped": 0
+  },
+  "caveat": "Synthetic churn, not a live-process heap profile; compressed bytes exclude interpreter/request working memory"
+}

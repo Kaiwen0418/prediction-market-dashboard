@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
 import math
+import os
+from pathlib import Path
 import random
 import time
 from dataclasses import dataclass
@@ -15,7 +17,7 @@ from app.services.market_catalog import (
     compact_polymarket_event,
     market_catalog_service,
 )
-from app.services.polymarket import fetch_json
+from app.services.polymarket import fetch_json, json_response_cache
 from app.services.upstream_rate_limit import upstream_rate_limiter
 from app.streaming.polymarket_ws import live_stream_manager
 
@@ -57,6 +59,15 @@ class MonitoredMarket:
     title: str
     tier: Tier
     activity_score: float
+
+
+def _memory_status() -> dict[str, int | None]:
+    try:
+        resident = int(Path('/proc/self/statm').read_text().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+        current = int(Path('/sys/fs/cgroup/memory.current').read_text())
+    except (OSError, ValueError, IndexError):
+        return dict(rss_bytes=None,cgroup_bytes=None)
+    return dict(rss_bytes=resident,cgroup_bytes=current)
 
 
 class MarketMonitoringService:
@@ -197,6 +208,8 @@ class MarketMonitoringService:
         )
         return {
             "enabled": get_settings().monitoring_enabled,
+            "responseCache": json_response_cache.status(),
+            "memory": _memory_status(),
             "startedAt": self._started_at,
             "counts": counts,
             "rateLimits": upstream_rate_limiter.status(),

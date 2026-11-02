@@ -227,8 +227,10 @@ async def scan_polymarket_events() -> tuple[list[dict[str, Any]], int]:
             params["after_cursor"] = cursor
         payload = await fetch_json(
             f"{settings.gamma_base_url}/events/keyset?{urlencode(params)}",
-            cache_ttl_seconds=settings.market_catalog_sync_interval_seconds,
-            stale_if_error_seconds=settings.market_catalog_stale_if_error_seconds,
+            # The service caches the compact snapshot and retains it on scan errors.
+            # Large cursor pages are transient and must not populate the response cache.
+            cache_ttl_seconds=0,
+            stale_if_error_seconds=0,
         )
         page_events = (
             payload
@@ -270,8 +272,10 @@ async def scan_kalshi_events() -> tuple[list[dict[str, Any]], int]:
             params["cursor"] = cursor
         payload = await fetch_json(
             f"{settings.kalshi_base_url}/events?{urlencode(params)}",
-            cache_ttl_seconds=settings.market_catalog_sync_interval_seconds,
-            stale_if_error_seconds=settings.market_catalog_stale_if_error_seconds,
+            # The service caches the compact snapshot and retains it on scan errors.
+            # Large cursor pages are transient and must not populate the response cache.
+            cache_ttl_seconds=0,
+            stale_if_error_seconds=0,
         )
         if not isinstance(payload, dict):
             break

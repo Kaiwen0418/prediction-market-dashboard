@@ -25,6 +25,10 @@ class Settings(BaseSettings):
             "http://127.0.0.1:3000",
         ]
     )
+    json_cache_max_bytes: int = 32 * 1024**2
+    json_cache_max_entries: int = 256
+    json_cache_max_decoded_bytes: int = 64 * 1024**2
+    json_cache_max_entry_bytes: int = 8 * 1024**2
     request_timeout_seconds: float = 8.0
     polymarket_market_cache_ttl_seconds: int = 300
     polymarket_market_stale_if_error_seconds: int = 3600
