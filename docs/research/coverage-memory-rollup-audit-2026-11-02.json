@@ -1,0 +1,52 @@
+{
+  "at": "2026-11-02 11:10:32.238801+00:00",
+  "source": {
+    "eligible_fills": "534069"
+  },
+  "parts": {
+    "contribution_rows": 351672,
+    "fills": "534069",
+    "bytes": 370532352
+  },
+  "cells": {
+    "cells": 240027
+  },
+  "gaps": {
+    "missing_receipts": 0
+  },
+  "jobs": [
+    {
+      "kind": "slow_wallets",
+      "enabled": true,
+      "checkpoint": {
+        "scope": "Seven retained UTC dates; at least six hours and two observed dates",
+        "row_limit": 200000,
+        "candidates": 10
+      },
+      "failures": 0,
+      "last_error": null
+    },
+    {
+      "kind": "wallet_rollup_backfill",
+      "enabled": false,
+      "checkpoint": {
+        "done": true,
+        "scope": "All eligible retained receipt fills; source expiry/feed gaps remain",
+        "version": 6,
+        "before_id": "165933dcd4684fca8e39bc6d33d7e568",
+        "before_time": "2026-11-02T00:17:14.631340+00:00",
+        "eligible_fills": 524810,
+        "processed_receipts": 915
+      },
+      "failures": 0,
+      "last_error": null
+    }
+  ],
+  "source_sha256": {
+    "schema.sql": "8ae6c0dffe14087ced9a0461bf37a9087c73ba090dd61f02a3ad5fc5abc7b496",
+    "longitudinal.py": "00f9e3076351c7cc95a2295479b1a2a4ddbdba4dc486e84f7d70b3da6f945a1f",
+    "investigations.py": "9944b35e71a24a3f9aa8a4d7dd3bb6c3db075baf570e2c29542c57c8189484ac",
+    "detectors.py": "7af9ba87549b9042729c043de46e2726e8985fc2dd4f05820e7cc91bb0ed6746",
+    "worker.py": "f4134054a38c15846912150c825b160ea0e299022b916f71a806c1838bc9effb"
+  }
+}

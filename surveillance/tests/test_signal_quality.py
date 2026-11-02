@@ -103,15 +103,15 @@ class QualityPostgresTests(unittest.IsolatedAsyncioTestCase):
         await self.intake('exit',[recent+timedelta(minutes=1)],side='SELL',quantity=3000)
         self.assertEqual((await find_accumulations(self.store))['candidates'],0)
 
-    async def test_daily_cap_allows_existing_cells_but_not_new_wallets(self):
+    async def test_new_wallets_and_dates_are_admitted_without_a_row_cap(self):
         recent=datetime.now(timezone.utc)-timedelta(minutes=1)
-        with patch('surveillance.longitudinal.DAILY_LIMIT',1):
-            await self.intake('one',[recent])
-            await self.intake('two',[recent],wallet='0x'+'b'*40)
-            await self.intake('three',[recent])
+        await self.intake('one',[recent])
+        await self.intake('two',[recent],wallet='0x'+'b'*40)
+        await self.intake('three',[recent])
+        await self.intake('new-day',[recent-timedelta(days=1)])
         cells=await self.store.fetch('SELECT * FROM surveillance_wallet_daily')
-        self.assertEqual(len(cells),1);self.assertEqual(cells[0]['fills'],2)
-        self.assertEqual(len(await self.store.fetch("SELECT * FROM surveillance_coverage WHERE kind='wallet_rollup_capacity'")),1)
+        self.assertEqual(len(cells),3);self.assertEqual(sum(c['fills'] for c in cells),4)
+        self.assertFalse(await self.store.fetch("SELECT * FROM surveillance_coverage WHERE kind='wallet_rollup_capacity'"))
 
     async def test_delayed_replay_uses_knowledge_clock_and_preserves_source_head(self):
         cutoff=datetime.now(timezone.utc).replace(second=0,microsecond=0)-timedelta(minutes=5)

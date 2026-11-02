@@ -14,8 +14,9 @@ from psycopg.types.json import Jsonb
 
 LOCK = 81724003
 QUERY_TIMEOUT_MS = 15000
-DERIVED = ('surveillance_observations','surveillance_wallet_daily','surveillance_wallet_events','surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles')
-TABLES = ('surveillance_scout',*DERIVED, 'surveillance_dirty_bins', "surveillance_case_versions", "surveillance_cases", "surveillance_information",
+DERIVED = ('surveillance_observations','surveillance_wallet_events','surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles')
+SCALAR_DERIVED=('surveillance_wallet_daily_parts','surveillance_wallet_daily_receipts')
+TABLES = ('surveillance_scout',*SCALAR_DERIVED,*DERIVED, 'surveillance_dirty_bins', "surveillance_case_versions", "surveillance_cases", "surveillance_information",
           "surveillance_trades", "surveillance_rules", "surveillance_markets",
           "surveillance_raw", "surveillance_coverage")
 
@@ -86,6 +87,9 @@ async def evict_batch(c, limit=500, changed=None):
         if removed.rowcount:changed.add("surveillance_case_versions")
         removed=await c.execute("DELETE FROM surveillance_cases WHERE id IN(SELECT id FROM capacity_cases)")
         if removed.rowcount:changed.add("surveillance_cases")
+        for table in SCALAR_DERIVED:
+            removed=await c.execute(sql.SQL('DELETE FROM {} WHERE raw_id=ANY(%s)').format(sql.Identifier(table)),(ids,))
+            if removed.rowcount:changed.add(table)
         for table in DERIVED:
             removed=await c.execute(sql.SQL('DELETE FROM {} WHERE raw_ids && %s').format(sql.Identifier(table)), (ids,))
             if removed.rowcount:changed.add(table)

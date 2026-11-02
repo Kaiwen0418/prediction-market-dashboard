@@ -114,16 +114,6 @@ CREATE TABLE IF NOT EXISTS surveillance_observations (
 );
 CREATE INDEX IF NOT EXISTS surveillance_observation_window ON surveillance_observations(venue,market_id,upper_time);
 CREATE INDEX IF NOT EXISTS surveillance_observation_raw ON surveillance_observations USING gin(raw_ids);
-CREATE TABLE IF NOT EXISTS surveillance_wallet_daily (
- wallet text NOT NULL,market_id text NOT NULL,outcome text NOT NULL,outcome_label text NOT NULL,day date NOT NULL,
- known_at timestamptz NOT NULL,first_event timestamptz NOT NULL,last_event timestamptz NOT NULL,
- fills bigint NOT NULL,buy_cash numeric NOT NULL,sell_cash numeric NOT NULL,
- buy_shares numeric NOT NULL,sell_shares numeric NOT NULL,max_fill_cash numeric NOT NULL,
- raw_ids text[] NOT NULL,refs_complete boolean NOT NULL,
- PRIMARY KEY(wallet,market_id,outcome,day)
-);
-CREATE INDEX IF NOT EXISTS surveillance_wallet_daily_recent ON surveillance_wallet_daily(known_at);
-CREATE INDEX IF NOT EXISTS surveillance_wallet_daily_raw ON surveillance_wallet_daily USING gin(raw_ids);
 CREATE TABLE IF NOT EXISTS surveillance_wallet_events (
  wallet text NOT NULL,event_key text NOT NULL,known_at timestamptz NOT NULL,
  document jsonb NOT NULL,raw_ids text[] NOT NULL,PRIMARY KEY(wallet,event_key,known_at)
@@ -168,3 +158,43 @@ DROP TRIGGER IF EXISTS surveillance_case_evidence ON surveillance_cases;
 CREATE TRIGGER surveillance_case_evidence BEFORE INSERT OR UPDATE OF document ON surveillance_cases
     FOR EACH ROW EXECUTE FUNCTION surveillance_index_case_evidence();
 INSERT INTO surveillance_schema VALUES(5) ON CONFLICT DO NOTHING;
+
+
+-- Receipt contributions provide exact retraction when FIFO expires a source.
+CREATE TABLE IF NOT EXISTS surveillance_wallet_daily_receipts (
+ raw_id text PRIMARY KEY REFERENCES surveillance_raw(id) ON DELETE CASCADE,
+ known_at timestamptz NOT NULL DEFAULT now(),eligible_fills bigint NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS surveillance_wallet_daily_parts (
+ raw_id text NOT NULL REFERENCES surveillance_raw(id) ON DELETE CASCADE,
+ wallet text NOT NULL,market_id text NOT NULL,outcome text NOT NULL,outcome_label text NOT NULL,day date NOT NULL,
+ known_at timestamptz NOT NULL,first_event timestamptz NOT NULL,last_event timestamptz NOT NULL,
+ fills bigint NOT NULL,buy_cash numeric NOT NULL,sell_cash numeric NOT NULL,
+ buy_shares numeric NOT NULL,sell_shares numeric NOT NULL,max_fill_cash numeric NOT NULL,
+ PRIMARY KEY(raw_id,wallet,market_id,outcome,day)
+);
+CREATE INDEX IF NOT EXISTS surveillance_wallet_parts_key ON surveillance_wallet_daily_parts(wallet,market_id,outcome,day);
+CREATE INDEX IF NOT EXISTS surveillance_wallet_parts_day ON surveillance_wallet_daily_parts(day);
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM surveillance_schema WHERE version=6) THEN
+  IF EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname=current_schema() AND c.relname='surveillance_wallet_daily' AND c.relkind='r') THEN
+    DROP TABLE surveillance_wallet_daily;
+  END IF;
+  UPDATE surveillance_cases SET document=document||jsonb_build_object('rollup_superseded',true,
+    'rollup_note','Former admission-capped summary superseded; retained-source rebuild required')
+    WHERE document->>'kind'='slow_accumulation';
+  INSERT INTO surveillance_case_versions(case_id,version,document)
+    SELECT c.id,COALESCE((SELECT max(version) FROM surveillance_case_versions v WHERE v.case_id=c.id),0)+1,c.document
+    FROM surveillance_cases c WHERE c.document->>'kind'='slow_accumulation';
+  INSERT INTO surveillance_coverage(venue,kind,document) VALUES('polymarket','wallet_rollup_rebuild',
+    '{"version":6,"scope":"All eligible retained fills; formerly skipped cells require receipt replay; expired sources cannot be recovered"}');
+  INSERT INTO surveillance_schema VALUES(6);
+ END IF;
+END $$;
+CREATE OR REPLACE VIEW surveillance_wallet_daily AS
+ SELECT wallet,market_id,outcome,min(outcome_label) AS outcome_label,day,max(known_at) AS known_at,
+ min(first_event) AS first_event,max(last_event) AS last_event,sum(fills) AS fills,
+ sum(buy_cash) AS buy_cash,sum(sell_cash) AS sell_cash,sum(buy_shares) AS buy_shares,sum(sell_shares) AS sell_shares,
+ max(max_fill_cash) AS max_fill_cash,array_agg(DISTINCT raw_id) AS raw_ids,true AS refs_complete
+ FROM surveillance_wallet_daily_parts GROUP BY wallet,market_id,outcome,day;

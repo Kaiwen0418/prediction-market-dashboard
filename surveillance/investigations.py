@@ -16,14 +16,14 @@ class ReplayCapacityError(ValueError):
     pass
 
 
-async def replay(store,venue,market_id,as_of,persist=True,max_trades=50000,knowledge_cutoff=None):
+async def replay(store,venue,market_id,as_of,persist=True,max_trades=50000,knowledge_cutoff=None,diagnostics=None):
     # Hold the evidence lock across all reads and case pins; FIFO cannot interleave.
     from psycopg.types.json import Jsonb
     class View:
         def __init__(self,c):self.c=c
         async def fetch(self,sql,params=()):return await (await self.c.execute(sql,params)).fetchall()
     async with store.connection() as c:
-        docs=await _replay(View(c),venue,market_id,as_of,max_trades,knowledge_cutoff)
+        docs=await _replay(View(c),venue,market_id,as_of,max_trades,knowledge_cutoff,diagnostics)
         if persist:
             for doc in docs:
                 await c.execute("INSERT INTO surveillance_cases(id,venue,market_id,status,document) VALUES(%s,%s,%s,'candidate',%s) ON CONFLICT DO NOTHING",(doc['id'],venue,market_id,Jsonb(doc)))
@@ -31,18 +31,27 @@ async def replay(store,venue,market_id,as_of,persist=True,max_trades=50000,knowl
         return docs
 
 
-async def _replay(store,venue,market_id,as_of,max_trades,knowledge_cutoff):
+async def _replay(store,venue,market_id,as_of,max_trades,knowledge_cutoff,diagnostics=None):
     cutoff = datetime.fromisoformat(as_of)
     if cutoff.tzinfo is None:
         raise ValueError("as_of must include timezone")
     known=datetime.fromisoformat(knowledge_cutoff or as_of)
     if known.tzinfo is None or cutoff>known:raise ValueError('Event cutoff must not exceed knowledge cutoff')
-    observations,observation_ids=await intervals(store,venue,market_id,cutoff-timedelta(hours=13),cutoff,known)
-    rows = await store.fetch("""SELECT document,raw_id,id FROM surveillance_trades WHERE venue=%s AND market_id=%s
-        AND event_time<=%s AND received_at<=%s AND event_time>%s ORDER BY event_time,id LIMIT %s""",
-        (venue, market_id, cutoff, known, cutoff - timedelta(hours=13), max_trades + 1))
-    if len(rows) > max_trades:
-        raise ReplayCapacityError(f"Replay exceeds {max_trades} observed trades; no partial score produced")
+    selected_windows=(60,300,3600)
+    omitted=[]
+    for minutes,windows in ((780,(60,300,3600)),(65,(60,300)),(13,(60,)),(7,(60,))):
+        rows=await store.fetch("""SELECT document,raw_id,id FROM surveillance_trades WHERE venue=%s AND market_id=%s
+            AND event_time<=%s AND received_at<=%s AND event_time>%s ORDER BY event_time DESC,id LIMIT %s""",
+            (venue,market_id,cutoff,known,cutoff-timedelta(minutes=minutes),max_trades+1))
+        if len(rows)<=max_trades:
+            selected_windows=windows;omitted=[s for s in (60,300,3600) if s not in windows]
+            break
+    else:
+        raise ReplayCapacityError(f"Even 7-minute replay exceeds {max_trades} observed trades; no partial score produced")
+    if diagnostics is not None:diagnostics.update(replay_horizon_minutes=minutes,omitted_windows_seconds=omitted,observed_trades=len(rows))
+    observations,observation_ids=await intervals(store,venue,market_id,cutoff-timedelta(minutes=minutes),cutoff,known)
+    # Never treat history outside the retrieved horizon as observed zero.
+    observations=[(max(lo,cutoff-timedelta(minutes=minutes)),min(hi,cutoff)) for lo,hi in observations]
     # Pin metadata to its observation time; current rules must not leak into replay.
     rules = await store.fetch("""SELECT * FROM surveillance_rules WHERE venue=%s AND market_id=%s AND observed_at<=%s
         ORDER BY observed_at DESC LIMIT 1""", (venue, market_id, known))
@@ -60,7 +69,7 @@ async def _replay(store,venue,market_id,as_of,max_trades,knowledge_cutoff):
         t = dict(row["document"], id=row["id"], raw_id=row["raw_id"])
         groups.setdefault(t["token_id"] or t["outcome"], []).append(t)
     for outcome_key, trades in groups.items():
-        for signal in evaluate(trades,cutoff.isoformat(),knowledge_cutoff=known.isoformat(),coverage=observations):
+        for signal in evaluate(trades,cutoff.isoformat(),knowledge_cutoff=known.isoformat(),coverage=observations,windows=selected_windows):
             if signal["anomaly_score"] < 35:
                 continue
             signal_ids = set(signal["trade_ids"])
@@ -83,6 +92,7 @@ async def _replay(store,venue,market_id,as_of,max_trades,knowledge_cutoff):
             document = dict(id=digest([VERSION, venue, market_id, outcome_key, signal["window_seconds"],cutoff.isoformat(),signal["trade_ids"]]),
                 venue=venue,market_id=market_id,outcome_key=outcome_key,signal=signal,
                 kind='trade_anomaly',knowledge_cutoff=known.isoformat(),observation_ids=observation_ids,
+                replay_horizon_minutes=minutes,omitted_windows_seconds=omitted,
                 analysis_mode='as_of_replay',
                 quality_components=dict(current_observed=signal['current_fully_observed'],baseline_observed_windows=signal['baseline_observed_windows'],rules_available=bool(rules),delay_seconds=signal['detected_with_delay_seconds']),
                 anomaly_score=signal["anomaly_score"], evidence_quality=quality,

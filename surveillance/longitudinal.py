@@ -3,89 +3,106 @@ from datetime import datetime,timedelta,timezone
 from decimal import Decimal
 from collections import defaultdict
 import re
+import time
 
 from psycopg.types.json import Jsonb
 
 from .normalization import digest,now
 from .money import cash
 
-DAILY_LIMIT=200000
+ROLLUP_VERSION=6
 
 
-async def ingest_daily(c,trades,raw_id=None):
-    rows=[t for t in trades if t['venue']=='polymarket' and re.fullmatch(r'0x[0-9a-fA-F]{40}',t.get('wallet') or '') and
-          datetime.now(timezone.utc)-timedelta(days=7)<=datetime.fromisoformat(t['event_time'])<=datetime.now(timezone.utc)]
-    if not rows:return
-    existing=(await (await c.execute('SELECT count(*) AS n FROM surveillance_wallet_daily')).fetchone())['n']
-    allowance=max(0,DAILY_LIMIT-existing)
-    # SQL groups a page before admission; only new fills enter this transaction.
-    await c.execute('''WITH grouped AS (
-        SELECT lower(t->>'wallet') AS wallet,t->>'market_id' AS market_id,
-            COALESCE(NULLIF(t->>'token_id',''),t->>'outcome') AS outcome,min(t->>'outcome') AS label,
-            ((t->>'event_time')::timestamptz AT TIME ZONE 'UTC')::date AS day,
-            min((t->>'event_time')::timestamptz) AS first_event,max((t->>'event_time')::timestamptz) AS last_event,
-            count(*) AS fills,
-            COALESCE(sum((t->>'price')::numeric*(t->>'quantity')::numeric) FILTER(WHERE t->>'direction'='1'),0) AS buys,
-            COALESCE(sum((t->>'price')::numeric*(t->>'quantity')::numeric) FILTER(WHERE t->>'direction'='-1'),0) AS sells,
-            COALESCE(sum((t->>'quantity')::numeric) FILTER(WHERE t->>'direction'='1'),0) AS buy_shares,
-            COALESCE(sum((t->>'quantity')::numeric) FILTER(WHERE t->>'direction'='-1'),0) AS sell_shares,
-            max((t->>'price')::numeric*(t->>'quantity')::numeric) AS max_cash
-        FROM jsonb_array_elements(%s) t GROUP BY 1,2,3,5
-    ), admitted AS (
-        SELECT g.*,old.wallet IS NOT NULL AS known,
-            sum(CASE WHEN old.wallet IS NULL THEN 1 ELSE 0 END) OVER(ORDER BY md5(g.wallet||g.market_id||g.outcome||g.day::text)) AS admission_index
-        FROM grouped g LEFT JOIN surveillance_wallet_daily old USING(wallet,market_id,outcome,day)
-    ) INSERT INTO surveillance_wallet_daily
-        SELECT wallet,market_id,outcome,label,day,now(),first_event,last_event,fills,buys,sells,buy_shares,sell_shares,max_cash,ARRAY[%s]::text[],true
-        FROM admitted WHERE known OR admission_index<=%s
-        ON CONFLICT(wallet,market_id,outcome,day) DO UPDATE SET
-            known_at=now(),first_event=LEAST(surveillance_wallet_daily.first_event,EXCLUDED.first_event),
-            last_event=GREATEST(surveillance_wallet_daily.last_event,EXCLUDED.last_event),
-            fills=surveillance_wallet_daily.fills+EXCLUDED.fills,
-            buy_cash=surveillance_wallet_daily.buy_cash+EXCLUDED.buy_cash,sell_cash=surveillance_wallet_daily.sell_cash+EXCLUDED.sell_cash,
-            buy_shares=surveillance_wallet_daily.buy_shares+EXCLUDED.buy_shares,sell_shares=surveillance_wallet_daily.sell_shares+EXCLUDED.sell_shares,
-            max_fill_cash=GREATEST(surveillance_wallet_daily.max_fill_cash,EXCLUDED.max_fill_cash),
-            refs_complete=surveillance_wallet_daily.refs_complete AND
-                (%s=ANY(surveillance_wallet_daily.raw_ids) OR cardinality(surveillance_wallet_daily.raw_ids)<64),
-            raw_ids=ARRAY(SELECT DISTINCT rid FROM unnest(surveillance_wallet_daily.raw_ids||EXCLUDED.raw_ids) rid ORDER BY rid LIMIT 64)
-        ''',(Jsonb(rows),raw_id,allowance,raw_id))
-    if not allowance:
-        # A bounded telemetry row per hour, not one per rejected fill/page.
-        await c.execute('''INSERT INTO surveillance_coverage(venue,kind,document)
-            SELECT 'polymarket','wallet_rollup_capacity',%s WHERE NOT EXISTS(
-                SELECT 1 FROM surveillance_coverage WHERE kind='wallet_rollup_capacity' AND observed_at>now()-interval '1 hour')''',
-            (Jsonb(dict(row_limit=DAILY_LIMIT,meaning='New wallet/day cells skipped; existing tracked cells continue; no claim of complete wallet coverage')),))
+async def ingest_daily(c,trades,raw_id):
+    """Only newly inserted fills reach this path; each receipt is applied once."""
+    poly=[t for t in trades if t['venue']=='polymarket']
+    if not poly:return dict(eligible_fills=0)
+    return await receipt_parts(c,raw_id,poly)
+
+
+async def receipt_parts(c,raw_id,trades=None):
+    inserted=await (await c.execute('''INSERT INTO surveillance_wallet_daily_receipts(raw_id) VALUES(%s)
+        ON CONFLICT DO NOTHING RETURNING raw_id''',(raw_id,))).fetchone()
+    if not inserted:return dict(duplicate=True,eligible_fills=0)
+    source='SELECT value AS t FROM jsonb_array_elements(%s)' if trades is not None else "SELECT document AS t FROM surveillance_trades WHERE venue='polymarket' AND raw_id=%s"
+    param=Jsonb(trades) if trades is not None else raw_id
+    rows=await (await c.execute(f'''WITH source AS ({source}),eligible AS (
+        SELECT t FROM source WHERE t->>'wallet' ~ '^0x[0-9a-fA-F]{{40}}$'
+        AND ((t->>'event_time')::timestamptz AT TIME ZONE 'UTC')::date>=(now() AT TIME ZONE 'UTC')::date-6
+    ) INSERT INTO surveillance_wallet_daily_parts
+        SELECT %s,lower(t->>'wallet'),t->>'market_id',COALESCE(NULLIF(t->>'token_id',''),t->>'outcome'),
+        min(t->>'outcome'),((t->>'event_time')::timestamptz AT TIME ZONE 'UTC')::date,now(),
+        min((t->>'event_time')::timestamptz),max((t->>'event_time')::timestamptz),count(*),
+        COALESCE(sum((t->>'price')::numeric*(t->>'quantity')::numeric) FILTER(WHERE t->>'direction'='1'),0),
+        COALESCE(sum((t->>'price')::numeric*(t->>'quantity')::numeric) FILTER(WHERE t->>'direction'='-1'),0),
+        COALESCE(sum((t->>'quantity')::numeric) FILTER(WHERE t->>'direction'='1'),0),
+        COALESCE(sum((t->>'quantity')::numeric) FILTER(WHERE t->>'direction'='-1'),0),
+        max((t->>'price')::numeric*(t->>'quantity')::numeric)
+        FROM eligible GROUP BY 1,2,3,4,6 RETURNING fills''',(param,raw_id))).fetchall()
+    total=sum(r['fills'] for r in rows)
+    await c.execute('UPDATE surveillance_wallet_daily_receipts SET eligible_fills=%s WHERE raw_id=%s',(total,raw_id))
+    return dict(eligible_fills=total,contributions=len(rows))
+
+
+async def backfill_daily(store,job,limit=50,work_seconds=2):
+    """Newest receipts first; live receipts are atomic and already marked processed."""
+    cp=job['checkpoint'];processed=0;fills=0;last=None;started=time.monotonic()
+    async with store.connection() as c:
+        await store.fence(c,job)
+        candidates=await (await c.execute('''SELECT r.id,r.received_at FROM surveillance_raw r
+            WHERE r.venue='polymarket' AND (r.received_at,r.id)<(%s::timestamptz,%s)
+            AND EXISTS(SELECT 1 FROM surveillance_trades t WHERE t.raw_id=r.id AND t.venue='polymarket')
+            AND NOT EXISTS(SELECT 1 FROM surveillance_wallet_daily_receipts d WHERE d.raw_id=r.id)
+            ORDER BY r.received_at DESC,r.id DESC LIMIT %s''',(cp.get('before_time','9999-01-01T00:00:00Z'),cp.get('before_id','~'),limit))).fetchall()
+        for raw in candidates:
+            if processed and time.monotonic()-started>=work_seconds:break
+            result=await receipt_parts(c,raw['id']);processed+=1;fills+=result['eligible_fills'];last=raw
+        done=len(candidates)<limit and processed==len(candidates)
+        checkpoint=dict(processed_receipts=cp.get('processed_receipts',0)+processed,
+            eligible_fills=cp.get('eligible_fills',0)+fills,done=done,version=ROLLUP_VERSION,
+            scope='All eligible retained receipt fills; source expiry/feed gaps remain')
+        if last:checkpoint.update(before_time=last['received_at'].isoformat(),before_id=last['id'])
+        elif cp.get('before_time'):checkpoint.update(before_time=cp['before_time'],before_id=cp['before_id'])
+        await c.execute("UPDATE surveillance_jobs SET checkpoint=%s,enabled=%s WHERE id=%s",(Jsonb(checkpoint),not done,job['id']))
+        if done:await c.execute("UPDATE surveillance_jobs SET due_at=now() WHERE kind='slow_wallets'")
+    return dict(checkpoint,processed_this_pass=processed)
 
 
 async def find_accumulations(store,limit=20):
+    rebuilding=await store.fetch("SELECT EXISTS(SELECT 1 FROM surveillance_jobs WHERE kind='wallet_rollup_backfill' AND enabled) AS pending")
+    if rebuilding[0]['pending']:return dict(status='rebuilding_retained_receipts',candidates=0,version=ROLLUP_VERSION)
     candidates=await store.fetch('''SELECT wallet,market_id,outcome,min(outcome_label) AS label,
         min(first_event) AS first_event,max(last_event) AS last_event,
         count(DISTINCT day) AS observed_days,sum(fills) AS fills,sum(buy_cash) AS buy_cash,sum(sell_cash) AS sell_cash,
         sum(buy_shares) AS buy_shares,sum(sell_shares) AS sell_shares,max(max_fill_cash) AS max_fill_cash,
-        bool_and(refs_complete) AS refs_complete FROM surveillance_wallet_daily
+        true AS refs_complete FROM surveillance_wallet_daily_parts
         WHERE day>=(now() AT TIME ZONE 'UTC')::date-6 GROUP BY wallet,market_id,outcome
-        HAVING count(DISTINCT day)>=2 AND max(last_event)-min(first_event)>=interval '6 hours'
+        HAVING max(last_event)<=now() AND count(DISTINCT day)>=2 AND max(last_event)-min(first_event)>=interval '6 hours'
             AND sum(fills)>=3 AND sum(buy_cash)>=1000 AND sum(buy_shares)>0
             AND sum(buy_shares)-sum(sell_shares)>=.8*sum(buy_shares)
         ORDER BY sum(buy_cash) DESC,wallet,market_id LIMIT %s''',(limit,))
     count=0
     for r in candidates:
-        refs=await store.fetch('''SELECT DISTINCT unnest(raw_ids) AS id FROM surveillance_wallet_daily
+        refs=await store.fetch('''SELECT DISTINCT raw_id AS id FROM surveillance_wallet_daily_parts
             WHERE wallet=%s AND market_id=%s AND outcome=%s AND day>=(now() AT TIME ZONE 'UTC')::date-6''',(r['wallet'],r['market_id'],r['outcome']))
+        if len(refs)>4096:
+            await store.coverage('polymarket','wallet_case_reference_budget',dict(wallet=r['wallet'],market_id=r['market_id'],references=len(refs),limit=4096))
+            continue
         key=digest(['slow-wallet-v1',r['wallet'],r['market_id'],r['outcome'],r['last_event'].date().isoformat()])
         old=await store.fetch('SELECT created_at,document FROM surveillance_cases WHERE id=%s',(key,))
         facts={k:(str(v) if isinstance(v,Decimal) else v.isoformat() if isinstance(v,datetime) else v) for k,v in r.items()}
         doc=dict(id=key,kind='slow_accumulation',venue='polymarket',market_id=r['market_id'],wallet=r['wallet'],
             outcome_key=r['outcome'],status='candidate',observations=facts,knowledge_cutoff=now(),
+            rollup_version=ROLLUP_VERSION,rollup_superseded=False,
             detected_at=old[0]['created_at'].isoformat() if old else now(),
             anomaly_score=None,evidence_quality=None,investigation_priority=None,
             replay_raw_ids=[x['id'] for x in refs if x['id']],
             score_meaning='Descriptive multi-day accumulation candidate, not an insider probability or realized position',
             limitations=['Observed buys less observed sells only; transfers/splits and unseen activity are unknown',
-                'Wallet/day admission and raw retention are bounded; history may be partial',
+                'All retained eligible receipts included; expired/unobserved sources remain unknown',
                 'One wallet address does not establish beneficial ownership or coordination'])
         await store.update_dossier(doc);count+=1
-    return dict(candidates=count,row_limit=DAILY_LIMIT,scope='Seven retained UTC dates; at least six hours and two observed dates')
+    return dict(candidates=count,row_limit=None,version=ROLLUP_VERSION,scope='Seven UTC dates within retained sources; at least six hours and two observed dates')
 
 
 async def record_event(store,information_id,as_of,max_rows=50000,refresh_resolution=False):

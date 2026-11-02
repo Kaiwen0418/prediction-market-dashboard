@@ -32,8 +32,10 @@ async def completeness(store):
             observation='unknown' if head_age is None else ('stale_head_observation' if head_age>120 else 'recent_head_observation'),
             meaning='Observed API head age; not a guarantee of upstream completeness or sub-minute detection'))
     longitudinal=await store.fetch('SELECT count(*) AS daily_rows,max(known_at) AS latest FROM surveillance_wallet_daily')
+    rollup_receipts=await store.fetch('SELECT count(*) AS processed_receipts,sum(eligible_fills) AS eligible_fills FROM surveillance_wallet_daily_receipts')
+    rollup_rebuild=await store.fetch("SELECT enabled,checkpoint FROM surveillance_jobs WHERE kind='wallet_rollup_backfill'")
     repeat_events=await store.fetch('SELECT count(*) AS versions FROM surveillance_wallet_events')
-    return dict(longitudinal=longitudinal[0],wallet_event_versions=repeat_events[0]['versions'],wide_freshness=freshness,wide_discovery=wide,selection=selection,aggregates=aggregate_state[0],pending_aggregate_bins=pending_bins[0]['n'],wallet_profiles=profiles,catalog=counts, detailed_rules=rules, jobs=jobs, recent_coverage=recent, raw=raw,
+    return dict(longitudinal=dict(longitudinal[0],version=6,row_limit=None,receipts=rollup_receipts[0],rebuild=rollup_rebuild,scope='All eligible retained receipt contributions; expired and unobserved sources remain unknown'),wallet_event_versions=repeat_events[0]['versions'],wide_freshness=freshness,wide_discovery=wide,selection=selection,aggregates=aggregate_state[0],pending_aggregate_bins=pending_bins[0]['n'],wallet_profiles=profiles,catalog=counts, detailed_rules=rules, jobs=jobs, recent_coverage=recent, raw=raw,
         accuracy="REST sampled; exact executable-depth history unavailable",
         limitations=["Catalog targets active non-combination contracts; global trades can include other contracts without deep eligibility",
                      "Catalog is a lightweight index; rule details exist only for selected/manual contracts",

@@ -1,4 +1,8 @@
 from contextlib import asynccontextmanager
+import asyncio
+import contextlib
+
+from app.services.polymarket import json_response_cache
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,15 +26,23 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    async def expire_cache():
+        while True:
+            await asyncio.sleep(60)
+            json_response_cache.prune()
     await live_stream_manager.start()
     await market_catalog_service.start()
     await market_monitoring_service.start()
+    cache_cleanup = asyncio.create_task(expire_cache(), name="response-cache-expiry")
     try:
         yield
     finally:
         await market_monitoring_service.stop()
         await market_catalog_service.stop()
         await live_stream_manager.stop()
+        cache_cleanup.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cache_cleanup
 
 
 app = FastAPI(

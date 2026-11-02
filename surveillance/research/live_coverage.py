@@ -41,7 +41,7 @@ async def main():
     print(json.dumps(dict(at=datetime.now(timezone.utc).isoformat(),settings=dict(contracts_per_venue=settings.contracts_per_venue,deep_poll_seconds=settings.poll_seconds,detail_seconds=settings.detail_seconds,wide_poll_seconds=settings.wide_poll_seconds,pages_per_claim=settings.pages_per_job),usage=await usage(store,settings),
         selection=selection,wide=broad,wide_jobs=job_state,wide_pages_5m=receipts,detector_ages=lags,
         observation_intervals=await store.fetch("SELECT venue,count(*) AS intervals,min(lower_time) AS oldest_sampled,max(upper_time) AS source_head,max(known_at) AS latest_known FROM surveillance_observations GROUP BY venue"),
-        multi_day=await store.fetch("SELECT count(*) AS daily_cells,pg_total_relation_size('surveillance_wallet_daily') AS bytes,min(first_event) AS oldest_event,max(last_event) AS newest_event FROM surveillance_wallet_daily"),
+        multi_day=await store.fetch("SELECT count(*) AS daily_cells,pg_total_relation_size('surveillance_wallet_daily_parts') AS bytes,min(first_event) AS oldest_event,max(last_event) AS newest_event FROM surveillance_wallet_daily"),
         case_kinds=await store.fetch("SELECT COALESCE(document->>'kind','legacy') AS kind,count(*) AS cases FROM surveillance_cases GROUP BY 1"),
         first_pass=await store.fetch("SELECT venue,checkpoint FROM surveillance_jobs WHERE kind='candidate_scan' ORDER BY venue"),
         pending_bins=await store.fetch("SELECT count(*) AS n,count(*) FILTER(WHERE bin_end<=now()) AS closed_ready,min(bin_end) AS oldest FROM surveillance_dirty_bins"),
