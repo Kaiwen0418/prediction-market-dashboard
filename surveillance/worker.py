@@ -27,6 +27,23 @@ class Worker:
         self.collector = collector or Collector(self.store, RawArchive(settings.raw_dir), settings.request_interval)
 
     async def seed(self):
+        if self.settings.mode=='retrospective':
+            # Preserve manual investigations; stop the automatic online workload.
+            async with self.store.connection() as c:
+                await c.execute("""UPDATE surveillance_jobs SET enabled=false
+                    WHERE enabled AND kind IN ('schedule','detect','scout_detect','candidate_scan',
+                    'slow_wallets','wallet_results','wallet_rollup_backfill','cash_bootstrap','aggregates','trades','details','wallet')
+                    AND (NOT COALESCE((payload->>'manual')::boolean,false) OR payload->>'lookup'='true' OR payload->>'trigger'='wide_feed' OR payload->>'reason' IN ('restore omitted catalog metadata','verified event settlement refresh'))""")
+                await c.execute("UPDATE surveillance_jobs SET enabled=false WHERE kind='catalog' AND enabled")
+            for venue in ('polymarket','kalshi'):
+                await self.store.enqueue(f'wide:{venue}:v2','wide',venue,{'scope':'global'})
+                await self.store.enqueue(f'settlements:{venue}','settlement_discovery',venue,{})
+                await self.store.enqueue(f'settlements:{venue}:head','settlement_discovery',venue,{'head':True})
+            await self.store.enqueue('settlements:kalshi:archive','settlement_discovery','kalshi',{'archive':True})
+            await self.store.enqueue('research-bootstrap:v7','research_bootstrap','system',{})
+            await self.store.enqueue('retrospective-dispatch','retrospective_dispatch','system',{})
+            await self.store.enqueue('maintenance','maintenance','system',{})
+            return
         await self.store.enqueue("aggregates", "aggregates", "system", {})
         await self.store.enqueue("maintenance", "maintenance", "system", {})
         catalog_ids = []
@@ -178,7 +195,7 @@ class Worker:
                     cp = {"completed_at": raw["received_at"], "pages": 0, "last_walk_started_at": started}
                 expire_before = started if job["kind"] == "catalog" and not cursor and job["payload"].get("scope") == "active-v2" else None
                 await self.store.commit_page(job, raw, cp, markets=markets, detailed=job["kind"] == "details",
-                                             catalog_expire_before=expire_before)
+                                             catalog_expire_before=expire_before,retrospective_settings=self.settings if self.settings.mode=='retrospective' else None)
             else:
                 cp.setdefault('legacy_walk', bool(cp.get('cursor')) and not cp.get('walk_upper'))
                 cp.setdefault('walk_upper', raw['received_at'])
@@ -237,8 +254,8 @@ class Worker:
                         'last_page_received_at':raw['received_at'],'feed_head_at':cp.get('feed_head_at'),
                         'http_cache_control':cp.get('http_cache_control'),'http_age':cp.get('http_age')}
                     cursor = None
-                await self.store.commit_page(job, raw, cp, trades=accepted, completed_walk=completed_walk)
-                if job['kind']=='wide':
+                await self.store.commit_page(job, raw, cp, trades=accepted, completed_walk=completed_walk,retrospective_settings=self.settings if self.settings.mode=='retrospective' else None)
+                if job['kind']=='wide' and self.settings.mode!='retrospective':
                     await self.resolve_unknowns(job['venue'],accepted)
             if not cursor:
                 await self.store.coverage(job["venue"], "walk_completed", {"kind": job["kind"],
@@ -265,7 +282,19 @@ class Worker:
         if not job:
             return False
         try:
-            if job['kind'] == 'aggregates':
+            if job['kind']=='settlement_discovery':
+                from .retrospective import discover
+                delay=await discover(self,job)
+            elif job['kind']=='retrospective_dispatch':
+                from .retrospective import dispatch
+                delay=await dispatch(self,job)
+            elif job['kind']=='research_bootstrap':
+                from .research_archive import bootstrap
+                delay=await bootstrap(self,job)
+            elif job['kind']=='retrospective':
+                from .retrospective import run
+                delay=await run(self,job)
+            elif job['kind'] == 'aggregates':
                 from .aggregates import materialize
                 if not job['checkpoint'].get('bootstrapped'):
                     async with self.store.connection() as c:
@@ -406,6 +435,17 @@ class Worker:
                     await self.store.fence(c,job)
                     await c.execute('UPDATE surveillance_jobs SET enabled=false WHERE id=%s',(job['id'],))
                 await self.store.coverage(job['venue'],'unmapped_market',{'reason':'metadata lookup failed three times; source remains unresolved'},job['id'])
+            if job['kind']=='retrospective' and job['failures']>=2:
+                saved=await self.store.fetch('SELECT checkpoint FROM surveillance_jobs WHERE id=%s',(job['id'],))
+                cp=saved[0]['checkpoint']
+                if cp.get('stage')!='analyze':
+                    review=await self.store.fetch('SELECT document FROM surveillance_retrospectives WHERE id=%s',(job['payload']['review_id'],))
+                    if review:
+                        cp.update(stage='analyze',next_end=review[0]['document']['requested_end'],backfill_status='source_error',source_error=type(exc).__name__)
+                        await self.store.checkpoint(job,cp)
+                else:
+                    from .retrospective import finish
+                    await finish(self,job,dict(cp,analysis_error=type(exc).__name__),'unavailable')
             await self.store.release(job, max(backoff, getattr(exc, "retry_after", 0)), reason)
         return True
 

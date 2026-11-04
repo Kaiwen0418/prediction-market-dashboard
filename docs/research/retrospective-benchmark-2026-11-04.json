@@ -1,0 +1,12 @@
+{
+  "fills": 50000,
+  "archive_insert_seconds": 0.733983688056469,
+  "read_seconds": 0.21081011230126023,
+  "analysis_seconds": 0.8131339396350086,
+  "peak_process_rss_kib": 238032,
+  "physical_bytes": 6643712,
+  "budget_bytes": 6263760,
+  "report_bytes": 645468,
+  "episodes": 49,
+  "constraints": "Synthetic 50k fills, 300 wallets, one CPU container; RSS includes fixture, JSON and Parquet; not live throughput guarantee"
+}

@@ -85,6 +85,9 @@ def market(venue, row, received_at):
         except (InvalidOperation,ValueError,TypeError):
             pass  # Invalid settlement fields are unknown evidence, not a winning outcome.
     result['resolved_outcome']=resolved_outcome
+    result['opened_at']=row.get('createdAt') if venue=='polymarket' else row.get('open_time') or row.get('created_time')
+    result['settled_at']=row.get('closedTime') if venue=='polymarket' else row.get('settlement_ts')
+    result['is_provisional']=bool(row.get('is_provisional',False))
     volume_key=('volumeNum' if 'volumeNum' in row else 'volume') if venue=='polymarket' else 'volume_fp'
     source_fields.update(volume=volume_key,volume_reported=volume_key)
     result['volume_reported']=any(k in row and row[k] is not None for k in ('volume','volumeNum','volume_fp'))

@@ -78,7 +78,70 @@ def create_app(settings=None):
     @app.get("/health")
     async def health():
         await store.fetch("SELECT 1")
-        return {"status": "ok", "collection_mode": "REST", "trading": False}
+        return {"status": "ok", "collection_mode": "REST", "analysis_mode": settings.mode, "trading": False}
+
+    @app.get('/retrospectives')
+    async def retrospectives(after: str = '', limit: int = Query(50,ge=1,le=200)):
+        rows=await store.fetch("""SELECT id,venue,market_id,status,known_at,
+            document->'market'->>'title' AS title,document->'completion' AS completion,
+            document->>'requested_start' AS requested_start,document->>'requested_end' AS requested_end
+            FROM surveillance_retrospectives WHERE id>%s ORDER BY id LIMIT %s""",(after,limit))
+        return dict(data=rows,next_after=rows[-1]['id'] if len(rows)==limit else None)
+
+    @app.get('/retrospectives/status')
+    async def retrospective_status():
+        states=await store.fetch('SELECT venue,status,count(*) AS n FROM surveillance_retrospectives GROUP BY venue,status')
+        budgets=await store.fetch('SELECT * FROM surveillance_research_budget')
+        jobs=await store.fetch("""SELECT id,kind,venue,enabled,failures,last_error,due_at,checkpoint FROM surveillance_jobs
+            WHERE kind IN ('settlement_discovery','retrospective_dispatch','research_bootstrap') OR (kind='retrospective' AND enabled)
+            ORDER BY id LIMIT 100""")
+        return dict(mode=settings.mode,states=states,budgets=budgets,jobs=jobs,
+            tape_budget=settings.research_tape_max_bytes,summary_budget=settings.research_summary_max_bytes,
+            budget_basis='Recorded tuple bytes plus per-row allowance; global physical DB ceiling also applies',
+            retention_days=settings.research_retention_days,lookback_days=settings.review_lookback_days,
+            limits='Bounded archive and lookback, not guaranteed full market lifetime or full venue coverage')
+
+    @app.get('/retrospectives/{review_id}')
+    async def retrospective(review_id: str, after: str = '', limit: int = Query(1,ge=1,le=5)):
+        rows=await store.fetch('SELECT * FROM surveillance_retrospectives WHERE id=%s',(review_id,))
+        if not rows:raise HTTPException(404,'Review not found or expired')
+        slices=await store.fetch('SELECT * FROM surveillance_review_slices WHERE review_id=%s AND id>%s ORDER BY id LIMIT %s',(review_id,after,limit))
+        refs={r['raw_id'] for s in slices for r in s['document'].get('raw_references',[])}
+        refs.add(rows[0]['document']['raw_id'])
+        available={r['id'] for r in await store.fetch('SELECT id FROM surveillance_raw WHERE id=ANY(%s)',(list(refs),))}
+        for s in slices:
+            references=s['document'].get('raw_references',[])
+            missing=sum(r['raw_id'] not in available for r in references)
+            s['document']['raw_evidence_status']='expired_or_partial' if missing else 'retained' if references else 'no_references'
+            s['document']['missing_raw_receipts']=missing
+            # Current archive availability, never trust a frozen replayability flag.
+            tape=await store.fetch('SELECT count(*) AS n,sum(fills) AS fills FROM surveillance_research_tape WHERE venue=%s AND market_id=%s AND lower_time<%s AND upper_time>=%s',
+                (rows[0]['venue'],rows[0]['market_id'],s['upper_time'],s['document']['context_start']))
+            s['document']['normalized_replay_available']=None
+            s['document']['current_archive_fragments']=tape[0]['n']
+            s['document']['replay_note']='Use replay endpoint to verify the input digest; surviving fragments alone do not prove completeness'
+        return dict(review=rows[0],settlement_raw_available=rows[0]['document']['raw_id'] in available,
+            slices=slices,next_after=slices[-1]['id'] if len(slices)==limit else None)
+
+    @app.get('/retrospectives/{review_id}/report',response_class=PlainTextResponse)
+    async def retrospective_report(review_id: str, after: str = ''):
+        import json
+        dossier=await retrospective(review_id,after,1)
+        return '# Retrospective market review\n\n' + 'Future-price research; not an online alert, profit calculation or insider probability.\n\n' +             'One slice per page. Use next_after to retrieve the remaining slices.\n\n```json\n' + json.dumps(dossier,default=str,ensure_ascii=False,indent=2) + '\n```\n'
+
+    @app.post('/retrospectives/{review_id}/slices/{slice_id}/replay')
+    async def retrospective_replay(review_id: str,slice_id: str):
+        rows=await store.fetch('SELECT r.venue,r.market_id,s.document FROM surveillance_review_slices s JOIN surveillance_retrospectives r ON r.id=s.review_id WHERE s.id=%s AND r.id=%s',(slice_id,review_id))
+        if not rows:raise HTTPException(404,'Slice not found or expired')
+        from .research_archive import read_tape
+        from .leadlag import analyze
+        r=rows[0];d=r['document']
+        try:trades,_=await read_tape(store,r['venue'],r['market_id'],d['context_start'],d.get('data_end',d['end']),settings.replay_max_trades,known_at=d.get('archive_cutoff'))
+        except ValueError as exc:raise HTTPException(413,str(exc))
+        result=analyze(trades,d['start'],d['end'],observation_end=d.get('data_end',d['end']))
+        if not d.get('input_digest') or result['input_digest']!=d['input_digest']:
+            raise HTTPException(409,'Normalized input set changed or expired; original replay unavailable')
+        return result
 
     @app.get("/coverage")
     async def coverage():

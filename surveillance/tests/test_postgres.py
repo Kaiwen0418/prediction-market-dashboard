@@ -36,7 +36,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         await self.store.initialize()
         self.folder = tempfile.TemporaryDirectory()
         self.archive = RawArchive(self.folder.name)
-        self.settings = Settings(self.dsn, Path(self.folder.name), request_interval=0, pages_per_job=1, database_max_bytes=1024**4)
+        self.settings = Settings(self.dsn, Path(self.folder.name), mode="online", request_interval=0, pages_per_job=1, database_max_bytes=1024**4)
 
     async def asyncTearDown(self):
         async with await psycopg.AsyncConnection.connect(self.base) as c:

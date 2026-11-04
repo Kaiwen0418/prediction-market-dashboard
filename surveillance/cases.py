@@ -37,7 +37,7 @@ async def completeness(store):
     repeat_events=await store.fetch('SELECT count(*) AS versions FROM surveillance_wallet_events')
     return dict(longitudinal=dict(longitudinal[0],version=6,row_limit=None,receipts=rollup_receipts[0],rebuild=rollup_rebuild,scope='All eligible retained receipt contributions; expired and unobserved sources remain unknown'),wallet_event_versions=repeat_events[0]['versions'],wide_freshness=freshness,wide_discovery=wide,selection=selection,aggregates=aggregate_state[0],pending_aggregate_bins=pending_bins[0]['n'],wallet_profiles=profiles,catalog=counts, detailed_rules=rules, jobs=jobs, recent_coverage=recent, raw=raw,
         accuracy="REST sampled; exact executable-depth history unavailable",
-        limitations=["Catalog targets active non-combination contracts; global trades can include other contracts without deep eligibility",
+        limitations=["Catalog scope depends on worker mode; retrospective mode discovers closed/settled contracts and disables deep selection",
                      "Catalog is a lightweight index; rule details exist only for selected/manual contracts",
                      "Global feeds are paginated observations; pending cursor is not caught-up coverage",
                      "Deep selection uses per-event caps, themed quotas and low-activity exploration",
