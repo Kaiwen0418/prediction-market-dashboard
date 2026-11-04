@@ -13,7 +13,10 @@ async def scan(store,venue,limit=20):
     metadata=await store.fetch('''SELECT document FROM surveillance_markets WHERE venue=%s
         AND (id=ANY(%s) OR condition_id=ANY(%s))''',(venue,keys,keys)) if keys else []
     markets={r['document'].get('condition_id') or r['document']['id']:r['document'] for r in metadata}
-    active=await store.fetch("SELECT payload->>'market_id' AS id FROM surveillance_jobs WHERE venue=%s AND ((enabled AND kind='detect') OR (kind='scout_detect' AND (enabled OR updated_at>now()-interval '5 minutes')))",(venue,))
+    active=await store.fetch("""SELECT payload->>'market_id' AS id FROM surveillance_jobs
+        WHERE venue=%s AND enabled AND kind IN ('detect','scout_detect')
+        UNION ALL SELECT payload->>'market_id' FROM surveillance_jobs
+        WHERE venue=%s AND NOT enabled AND kind='scout_detect' AND updated_at>now()-interval '5 minutes'""",(venue,venue))
     already={r['id'] for r in active};chosen=[];events={}
     ranked=sorted(candidates,key=lambda r:({'information':0,'sports':0,'civic':1,'other':2}.get(theme(markets[r['market_id']]),2) if r['market_id'] in markets else 3,-float(r['cash']),r['market_id']))
     for row in ranked:

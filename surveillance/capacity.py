@@ -194,7 +194,7 @@ async def enforce(store,settings,batch_limit=500,max_batches=1):
             indexed=progress['indexed']
             if progress['pending']:
                 return dict(before,blocked=True,index_pending=True,indexed_cases=indexed,evicted_receipts=0)
-            credit=await free_space(c)
+            credit,candidates=await free_space(c,details=True)
             measured=dict(before,database_used_bytes=max(0,before['database_bytes']-credit),reusable_database_bytes=credit)
             reclaiming=pressured(measured,settings) or previous.get('reclaiming',False)
             for _ in range(max_batches if reclaiming else 0):
@@ -212,7 +212,10 @@ async def enforce(store,settings,batch_limit=500,max_batches=1):
                     if time.monotonic()-started>20:break
                     await c.execute(sql.SQL('VACUUM (TRUNCATE FALSE) {}').format(sql.Identifier(table)))
             physical=(await (await c.execute('SELECT pg_database_size(current_database()) AS n')).fetchone())['n']
-            credit,candidates=await free_space(c,details=True)
+            # A no-op check has not changed table contents: reuse the estimate
+            # from this pass instead of rereading every non-all-visible heap.
+            if count:
+                credit,candidates=await free_space(c,details=True)
             # Rare physical-ceiling recovery, never a full rewrite of every table.
             # A failed rewrite is rolled back and not retried for an hour.
             if physical>=settings.database_max_bytes and time.time()>=next_compaction and candidates and candidates[0][0]>=128*1024**2:
@@ -224,7 +227,7 @@ async def enforce(store,settings,batch_limit=500,max_batches=1):
                 compacted=candidates[0][1]
                 await c.execute("SELECT set_config('statement_timeout',%s,false)",(str(QUERY_TIMEOUT_MS),))
                 physical=(await (await c.execute('SELECT pg_database_size(current_database()) AS n')).fetchone())['n']
-                credit=await free_space(c)
+                credit,candidates=await free_space(c,details=True)
             measured=dict(database_bytes=physical,database_used_bytes=max(0,physical-credit),reusable_database_bytes=credit,
                 raw_bytes=await asyncio.to_thread(raw_bytes,settings.raw_dir))
         except (psycopg.errors.QueryCanceled,psycopg.errors.LockNotAvailable,psycopg.errors.InsufficientPrivilege) as exc:

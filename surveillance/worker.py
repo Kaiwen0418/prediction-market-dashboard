@@ -106,10 +106,15 @@ class Worker:
         async with self.store.connection() as c:
             async with c.cursor() as cursor:
                 await cursor.executemany("""INSERT INTO surveillance_jobs(id,kind,venue,payload) VALUES(%s,%s,%s,%s)
-                    ON CONFLICT(id) DO UPDATE SET payload=EXCLUDED.payload""", rows)
-            await c.execute("""UPDATE surveillance_jobs SET enabled=(id=ANY(%s)),
-                due_at=CASE WHEN NOT enabled AND id=ANY(%s) THEN now() ELSE due_at END
-                WHERE venue=%s AND kind IN ('details','trades','detect') AND NOT COALESCE((payload->>'manual')::boolean,false)""", (keys,keys,venue))
+                    ON CONFLICT(id) DO UPDATE SET payload=EXCLUDED.payload
+                    WHERE surveillance_jobs.payload IS DISTINCT FROM EXCLUDED.payload""", rows)
+            # Change only transitions; rewriting every disabled historical job
+            # every five minutes generated dead tuples, WAL and cache churn.
+            await c.execute("""UPDATE surveillance_jobs SET enabled=false
+                WHERE enabled AND venue=%s AND kind IN ('details','trades','detect')
+                AND NOT COALESCE((payload->>'manual')::boolean,false) AND NOT(id=ANY(%s))""", (venue,keys))
+            await c.execute("""UPDATE surveillance_jobs SET enabled=true,due_at=now()
+                WHERE id=ANY(%s) AND NOT enabled""", (keys,))
         await self.store.coverage(venue, "budget", {"catalog_rows": count, "selected_contracts": len(chosen),
             "budget": self.settings.contracts_per_venue, "exploration_fraction": self.settings.exploration_fraction,
             'independent_events':len({event_key(m) for m in chosen}),
