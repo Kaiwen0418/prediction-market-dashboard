@@ -1,0 +1,704 @@
+{
+  "before": {
+    "at": "2026-11-04T10:30:06.991358+00:00",
+    "seconds": 45.40793065726757,
+    "tables": [
+      {
+        "table": "surveillance_jobs",
+        "heap_blks_read": 1457473,
+        "heap_blks_hit": 2849938,
+        "idx_blks_read": 2696,
+        "idx_blks_hit": 49039,
+        "toast_blks_read": 136,
+        "toast_blks_hit": 404
+      },
+      {
+        "table": "surveillance_trades",
+        "heap_blks_read": 211921,
+        "heap_blks_hit": 2273619,
+        "idx_blks_read": 4202,
+        "idx_blks_hit": 95855,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_markets",
+        "heap_blks_read": 25488,
+        "heap_blks_hit": 21383,
+        "idx_blks_read": 13753,
+        "idx_blks_hit": 15111,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_cases",
+        "heap_blks_read": 105,
+        "heap_blks_hit": 131,
+        "idx_blks_read": 263,
+        "idx_blks_hit": 897,
+        "toast_blks_read": 10287,
+        "toast_blks_hit": 61329
+      },
+      {
+        "table": "surveillance_wallet_daily_parts",
+        "heap_blks_read": 6389,
+        "heap_blks_hit": 35215,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_aggregates",
+        "heap_blks_read": 5627,
+        "heap_blks_hit": 226341,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 254,
+        "toast_blks_hit": 6262
+      },
+      {
+        "table": "surveillance_scout",
+        "heap_blks_read": 5228,
+        "heap_blks_hit": 2221,
+        "idx_blks_read": 629,
+        "idx_blks_hit": 2832,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_raw",
+        "heap_blks_read": 3563,
+        "heap_blks_hit": 5813,
+        "idx_blks_read": 114,
+        "idx_blks_hit": 7907,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_observations",
+        "heap_blks_read": 580,
+        "heap_blks_hit": 90380,
+        "idx_blks_read": 18,
+        "idx_blks_hit": 638,
+        "toast_blks_read": 2,
+        "toast_blks_hit": 30
+      },
+      {
+        "table": "surveillance_case_versions",
+        "heap_blks_read": 72,
+        "heap_blks_hit": 59,
+        "idx_blks_read": 15,
+        "idx_blks_hit": 6,
+        "toast_blks_read": 443,
+        "toast_blks_hit": 45841
+      },
+      {
+        "table": "surveillance_coverage",
+        "heap_blks_read": 432,
+        "heap_blks_hit": 2142,
+        "idx_blks_read": 37,
+        "idx_blks_hit": 23,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_rules",
+        "heap_blks_read": 171,
+        "heap_blks_hit": 727,
+        "idx_blks_read": 105,
+        "idx_blks_hit": 747,
+        "toast_blks_read": 35,
+        "toast_blks_hit": 67
+      },
+      {
+        "table": "surveillance_dirty_bins",
+        "heap_blks_read": 152,
+        "heap_blks_hit": 740,
+        "idx_blks_read": 257,
+        "idx_blks_hit": 2900,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_walks",
+        "heap_blks_read": 100,
+        "heap_blks_hit": 60,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_wallet_profiles",
+        "heap_blks_read": 24,
+        "heap_blks_hit": 30,
+        "idx_blks_read": 9,
+        "idx_blks_hit": 9,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_wallet_daily_receipts",
+        "heap_blks_read": 20,
+        "heap_blks_hit": 26,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_information",
+        "heap_blks_read": 5,
+        "heap_blks_hit": 157,
+        "idx_blks_read": 6,
+        "idx_blks_hit": 310,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_wallet_events",
+        "heap_blks_read": 2,
+        "heap_blks_hit": 20,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_schema",
+        "heap_blks_read": 1,
+        "heap_blks_hit": 1,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_capacity",
+        "heap_blks_read": 1,
+        "heap_blks_hit": 6,
+        "idx_blks_read": 2,
+        "idx_blks_hit": 2,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      }
+    ],
+    "wal_bytes": 119077474,
+    "cpu_one_core_percent": {
+      "prediction-market-backend-1": 4.28,
+      "prediction-market-surveillance-worker-1": 28.74,
+      "prediction-market-postgres-1": 56.71
+    },
+    "host_disks": {
+      "nvme0n1": {
+        "read_MiB": 2476.9,
+        "write_MiB": 537.1,
+        "busy_percent": 17.3
+      }
+    },
+    "temperatures_c": {
+      "coretemp:Package id 0": 60.0,
+      "nvme:Sensor 2": 53.85,
+      "nvme:Composite": 55.85,
+      "nvme:Sensor 1": 77.85
+    }
+  },
+  "after": {
+    "at": "2026-11-04T10:31:44.957823+00:00",
+    "seconds": 45.371583755128086,
+    "tables": [
+      {
+        "table": "surveillance_trades",
+        "heap_blks_read": 106530,
+        "heap_blks_hit": 1156630,
+        "idx_blks_read": 4582,
+        "idx_blks_hit": 135556,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_jobs",
+        "heap_blks_read": 32286,
+        "heap_blks_hit": 41097,
+        "idx_blks_read": 1188,
+        "idx_blks_hit": 7501,
+        "toast_blks_read": 176,
+        "toast_blks_hit": 585
+      },
+      {
+        "table": "surveillance_wallet_daily_parts",
+        "heap_blks_read": 3286,
+        "heap_blks_hit": 17522,
+        "idx_blks_read": 14,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_aggregates",
+        "heap_blks_read": 3122,
+        "heap_blks_hit": 112862,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 144,
+        "toast_blks_hit": 3114
+      },
+      {
+        "table": "surveillance_raw",
+        "heap_blks_read": 1796,
+        "heap_blks_hit": 8480,
+        "idx_blks_read": 103,
+        "idx_blks_hit": 12636,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_cases",
+        "heap_blks_read": 49,
+        "heap_blks_hit": 124,
+        "idx_blks_read": 74,
+        "idx_blks_hit": 478,
+        "toast_blks_read": 1698,
+        "toast_blks_hit": 37319
+      },
+      {
+        "table": "surveillance_scout",
+        "heap_blks_read": 1308,
+        "heap_blks_hit": 2841,
+        "idx_blks_read": 779,
+        "idx_blks_hit": 6771,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_case_versions",
+        "heap_blks_read": 46,
+        "heap_blks_hit": 16,
+        "idx_blks_read": 4,
+        "idx_blks_hit": 6,
+        "toast_blks_read": 399,
+        "toast_blks_hit": 22705
+      },
+      {
+        "table": "surveillance_coverage",
+        "heap_blks_read": 230,
+        "heap_blks_hit": 1153,
+        "idx_blks_read": 3,
+        "idx_blks_hit": 123,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_rules",
+        "heap_blks_read": 148,
+        "heap_blks_hit": 410,
+        "idx_blks_read": 22,
+        "idx_blks_hit": 792,
+        "toast_blks_read": 32,
+        "toast_blks_hit": 26
+      },
+      {
+        "table": "surveillance_markets",
+        "heap_blks_read": 152,
+        "heap_blks_hit": 4833,
+        "idx_blks_read": 153,
+        "idx_blks_hit": 2183,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_walks",
+        "heap_blks_read": 68,
+        "heap_blks_hit": 39,
+        "idx_blks_read": 25,
+        "idx_blks_hit": 92,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_dirty_bins",
+        "heap_blks_read": 63,
+        "heap_blks_hit": 1760,
+        "idx_blks_read": 11175,
+        "idx_blks_hit": 17602,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_wallet_daily_receipts",
+        "heap_blks_read": 22,
+        "heap_blks_hit": 13,
+        "idx_blks_read": 3,
+        "idx_blks_hit": 4,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_wallet_profiles",
+        "heap_blks_read": 7,
+        "heap_blks_hit": 19,
+        "idx_blks_read": 6,
+        "idx_blks_hit": 6,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_observations",
+        "heap_blks_read": 3,
+        "heap_blks_hit": 79524,
+        "idx_blks_read": 74,
+        "idx_blks_hit": 1559,
+        "toast_blks_read": 2,
+        "toast_blks_hit": 14
+      },
+      {
+        "table": "surveillance_information",
+        "heap_blks_read": 2,
+        "heap_blks_hit": 137,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 274,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_wallet_events",
+        "heap_blks_read": 2,
+        "heap_blks_hit": 9,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_schema",
+        "heap_blks_read": 1,
+        "heap_blks_hit": 0,
+        "idx_blks_read": 0,
+        "idx_blks_hit": 0,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      },
+      {
+        "table": "surveillance_capacity",
+        "heap_blks_read": 1,
+        "heap_blks_hit": 5,
+        "idx_blks_read": 2,
+        "idx_blks_hit": 2,
+        "toast_blks_read": 0,
+        "toast_blks_hit": 0
+      }
+    ],
+    "wal_bytes": 14374665,
+    "cpu_one_core_percent": {
+      "prediction-market-backend-1": 3.37,
+      "prediction-market-surveillance-worker-1": 25.13,
+      "prediction-market-postgres-1": 37.49
+    },
+    "host_disks": {
+      "nvme0n1": {
+        "read_MiB": 1235.5,
+        "write_MiB": 123.0,
+        "busy_percent": 11.0
+      }
+    },
+    "temperatures_c": {
+      "coretemp:Package id 0": 54.0,
+      "nvme:Sensor 2": 52.85,
+      "nvme:Composite": 55.85,
+      "nvme:Sensor 1": 77.85
+    }
+  },
+  "claim-before": [
+    {
+      "Plan": {
+        "Node Type": "Limit",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 19783.63,
+        "Total Cost": 19783.64,
+        "Plan Rows": 1,
+        "Plan Width": 79,
+        "Actual Startup Time": 28.248,
+        "Actual Total Time": 28.249,
+        "Actual Rows": 1,
+        "Actual Loops": 1,
+        "Shared Hit Blocks": 13139,
+        "Shared Read Blocks": 5280,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0,
+        "Plans": [
+          {
+            "Node Type": "Sort",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 19783.63,
+            "Total Cost": 19785.2,
+            "Plan Rows": 627,
+            "Plan Width": 79,
+            "Actual Startup Time": 28.246,
+            "Actual Total Time": 28.247,
+            "Actual Rows": 1,
+            "Actual Loops": 1,
+            "Sort Key": [
+              "(CASE kind WHEN 'wide'::text THEN 0 WHEN 'schedule'::text THEN 1 WHEN 'aggregates'::text THEN 2 WHEN 'candidate_scan'::text THEN 3 WHEN 'detect'::text THEN 4 WHEN 'scout_detect'::text THEN 4 WHEN 'wallet_rollup_backfill'::text THEN 4 ELSE 5 END)",
+              "due_at",
+              "(CASE kind WHEN 'details'::text THEN 0 ELSE 1 END)",
+              "id"
+            ],
+            "Sort Method": "top-N heapsort",
+            "Sort Space Used": 25,
+            "Sort Space Type": "Memory",
+            "Shared Hit Blocks": 13139,
+            "Shared Read Blocks": 5280,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0,
+            "Plans": [
+              {
+                "Node Type": "Seq Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Relation Name": "surveillance_jobs",
+                "Alias": "surveillance_jobs",
+                "Startup Cost": 0.0,
+                "Total Cost": 19780.5,
+                "Plan Rows": 627,
+                "Plan Width": 79,
+                "Actual Startup Time": 0.041,
+                "Actual Total Time": 28.102,
+                "Actual Rows": 269,
+                "Actual Loops": 1,
+                "Filter": "(enabled AND (due_at <= now()) AND ((lease_until IS NULL) OR (lease_until < now())))",
+                "Rows Removed by Filter": 67632,
+                "Shared Hit Blocks": 13130,
+                "Shared Read Blocks": 5280,
+                "Shared Dirtied Blocks": 0,
+                "Shared Written Blocks": 0,
+                "Local Hit Blocks": 0,
+                "Local Read Blocks": 0,
+                "Local Dirtied Blocks": 0,
+                "Local Written Blocks": 0,
+                "Temp Read Blocks": 0,
+                "Temp Written Blocks": 0
+              }
+            ]
+          }
+        ]
+      },
+      "Planning": {
+        "Shared Hit Blocks": 140,
+        "Shared Read Blocks": 0,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0
+      },
+      "Planning Time": 1.131,
+      "Triggers": [],
+      "Execution Time": 28.316
+    }
+  ],
+  "claim-after": [
+    {
+      "Plan": {
+        "Node Type": "Limit",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 0.28,
+        "Total Cost": 4.33,
+        "Plan Rows": 1,
+        "Plan Width": 79,
+        "Actual Startup Time": 0.048,
+        "Actual Total Time": 0.049,
+        "Actual Rows": 1,
+        "Actual Loops": 1,
+        "Shared Hit Blocks": 6,
+        "Shared Read Blocks": 0,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0,
+        "Plans": [
+          {
+            "Node Type": "Index Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Scan Direction": "Forward",
+            "Index Name": "surveillance_jobs_ready",
+            "Relation Name": "surveillance_jobs",
+            "Alias": "surveillance_jobs",
+            "Startup Cost": 0.28,
+            "Total Cost": 2538.96,
+            "Plan Rows": 627,
+            "Plan Width": 79,
+            "Actual Startup Time": 0.048,
+            "Actual Total Time": 0.048,
+            "Actual Rows": 1,
+            "Actual Loops": 1,
+            "Index Cond": "(due_at <= now())",
+            "Rows Removed by Index Recheck": 0,
+            "Filter": "((lease_until IS NULL) OR (lease_until < now()))",
+            "Rows Removed by Filter": 1,
+            "Shared Hit Blocks": 6,
+            "Shared Read Blocks": 0,
+            "Shared Dirtied Blocks": 0,
+            "Shared Written Blocks": 0,
+            "Local Hit Blocks": 0,
+            "Local Read Blocks": 0,
+            "Local Dirtied Blocks": 0,
+            "Local Written Blocks": 0,
+            "Temp Read Blocks": 0,
+            "Temp Written Blocks": 0
+          }
+        ]
+      },
+      "Planning": {
+        "Shared Hit Blocks": 206,
+        "Shared Read Blocks": 0,
+        "Shared Dirtied Blocks": 0,
+        "Shared Written Blocks": 0,
+        "Local Hit Blocks": 0,
+        "Local Read Blocks": 0,
+        "Local Dirtied Blocks": 0,
+        "Local Written Blocks": 0,
+        "Temp Read Blocks": 0,
+        "Temp Written Blocks": 0
+      },
+      "Planning Time": 0.853,
+      "Triggers": [],
+      "Execution Time": 0.088
+    }
+  ],
+  "status": {
+    "at": "2026-11-04T10:31:45.365979+00:00",
+    "jobs": [
+      {
+        "kind": "wide",
+        "venue": "polymarket",
+        "enabled": 1,
+        "failing": 0,
+        "latest_update": "2026-11-04T10:31:33.517832+00:00"
+      },
+      {
+        "kind": "maintenance",
+        "venue": "system",
+        "enabled": 1,
+        "failing": 0,
+        "latest_update": "2026-11-04T09:23:39.551345+00:00"
+      },
+      {
+        "kind": "slow_wallets",
+        "venue": "polymarket",
+        "enabled": 1,
+        "failing": 0,
+        "latest_update": "2026-11-04T09:29:24.455413+00:00"
+      },
+      {
+        "kind": "candidate_scan",
+        "venue": "polymarket",
+        "enabled": 1,
+        "failing": 0,
+        "latest_update": "2026-11-04T10:31:36.95189+00:00"
+      },
+      {
+        "kind": "detect",
+        "venue": "kalshi",
+        "enabled": 100,
+        "failing": 0,
+        "latest_update": "2026-11-04T10:31:44.330508+00:00"
+      },
+      {
+        "kind": "detect",
+        "venue": "polymarket",
+        "enabled": 100,
+        "failing": 0,
+        "latest_update": "2026-11-04T10:31:43.834834+00:00"
+      },
+      {
+        "kind": "trades",
+        "venue": "kalshi",
+        "enabled": 100,
+        "failing": 0,
+        "latest_update": "2026-11-04T10:31:45.326146+00:00"
+      },
+      {
+        "kind": "wide",
+        "venue": "kalshi",
+        "enabled": 1,
+        "failing": 0,
+        "latest_update": "2026-11-04T10:31:38.674858+00:00"
+      },
+      {
+        "kind": "candidate_scan",
+        "venue": "kalshi",
+        "enabled": 1,
+        "failing": 0,
+        "latest_update": "2026-11-04T10:31:37.183163+00:00"
+      },
+      {
+        "kind": "trades",
+        "venue": "polymarket",
+        "enabled": 100,
+        "failing": 0,
+        "latest_update": "2026-11-04T10:31:23.072633+00:00"
+      }
+    ],
+    "latest_receipts": [
+      {
+        "venue": "polymarket",
+        "received_at": "2026-11-04T10:31:33.385723+00:00"
+      },
+      {
+        "venue": "kalshi",
+        "received_at": "2026-11-04T10:31:45.256984+00:00"
+      }
+    ],
+    "indexes": [
+      {
+        "indexrelname": "surveillance_jobs_ready",
+        "bytes": 163840
+      },
+      {
+        "indexrelname": "surveillance_jobs_active",
+        "bytes": 16384
+      },
+      {
+        "indexrelname": "surveillance_jobs_scout_cooldown",
+        "bytes": 294912
+      },
+      {
+        "indexrelname": "surveillance_observation_head",
+        "bytes": 991232
+      }
+    ]
+  },
+  "measurement_notes": [
+    "45-second live samples have different incoming traffic and task schedules; not a controlled fixed-load benchmark.",
+    "Host disk totals include other services. PostgreSQL block reads may be served by the OS page cache.",
+    "Before sample includes one diagnostic queue EXPLAIN. After sample follows deployment warm-up; do not extrapolate to all-day temperature or load.",
+    "Container CPU percentages use one logical core as 100%."
+  ]
+}

@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS surveillance_jobs (
  lease_until timestamptz, lease_token text, failures integer NOT NULL DEFAULT 0,
  enabled boolean NOT NULL DEFAULT true, last_error text, updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- The archive of disabled jobs must not be read on every queue claim.
+CREATE INDEX IF NOT EXISTS surveillance_jobs_ready ON surveillance_jobs (
+ (CASE kind WHEN 'wide' THEN 0 WHEN 'schedule' THEN 1 WHEN 'aggregates' THEN 2
+ WHEN 'candidate_scan' THEN 3 WHEN 'detect' THEN 4 WHEN 'scout_detect' THEN 4
+ WHEN 'wallet_rollup_backfill' THEN 4 ELSE 5 END),due_at,
+ (CASE kind WHEN 'details' THEN 0 ELSE 1 END),id) WHERE enabled;
+CREATE INDEX IF NOT EXISTS surveillance_jobs_active ON surveillance_jobs(venue,kind) WHERE enabled;
+CREATE INDEX IF NOT EXISTS surveillance_jobs_scout_cooldown ON surveillance_jobs(venue,updated_at)
+ WHERE NOT enabled AND kind='scout_detect';
 CREATE TABLE IF NOT EXISTS surveillance_coverage (
  id bigserial PRIMARY KEY, job_id text, venue text NOT NULL, kind text NOT NULL,
  observed_at timestamptz NOT NULL DEFAULT now(), document jsonb NOT NULL
@@ -113,6 +122,8 @@ CREATE TABLE IF NOT EXISTS surveillance_observations (
  known_at timestamptz NOT NULL,raw_ids text[] NOT NULL,refs_complete boolean NOT NULL
 );
 CREATE INDEX IF NOT EXISTS surveillance_observation_window ON surveillance_observations(venue,market_id,upper_time);
+CREATE INDEX IF NOT EXISTS surveillance_observation_head ON surveillance_observations(venue,market_id,upper_time DESC)
+ INCLUDE(lower_time,known_at,id) WHERE refs_complete;
 CREATE INDEX IF NOT EXISTS surveillance_observation_raw ON surveillance_observations USING gin(raw_ids);
 CREATE TABLE IF NOT EXISTS surveillance_wallet_events (
  wallet text NOT NULL,event_key text NOT NULL,known_at timestamptz NOT NULL,

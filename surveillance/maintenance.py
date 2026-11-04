@@ -45,22 +45,22 @@ async def prune(store, days=7, limit=50000):
                     AND NOT EXISTS(SELECT 1 FROM surveillance_markets m WHERE m.venue=old.venue AND m.condition_id=old.market_id)))
             AND NOT EXISTS (SELECT 1 FROM surveillance_cases c WHERE c.document->>'rules_raw_id'=old.raw_id)
             LIMIT %s)""", (evidence_cutoff, limit))
-        deleted = await (await c.execute("""WITH refs AS (
-            SELECT unnest(raw_ids) AS id FROM surveillance_observations
-            UNION SELECT raw_id FROM surveillance_wallet_daily_parts
-            UNION SELECT unnest(raw_ids) FROM surveillance_wallet_events
-            UNION SELECT unnest(metadata_raw_ids) FROM surveillance_markets
-            UNION SELECT unnest(raw_ids) FROM surveillance_aggregates
-            UNION SELECT unnest(raw_ids) FROM surveillance_walks
-            UNION SELECT unnest(raw_ids) FROM surveillance_wallet_profiles
-            UNION SELECT raw_id FROM surveillance_markets UNION SELECT raw_id FROM surveillance_rules
-            UNION SELECT raw_id FROM surveillance_trades UNION SELECT raw_id FROM surveillance_information
-            UNION SELECT unnest(evidence_raw_ids) FROM surveillance_cases
-        ), expired AS (
-            SELECT id FROM surveillance_raw r WHERE received_at<%s AND NOT EXISTS(SELECT 1 FROM refs WHERE refs.id=r.id)
-            LIMIT %s
-        ) DELETE FROM surveillance_raw WHERE id IN(SELECT id FROM expired) RETURNING path""",
-            (evidence_cutoff, min(limit, 10000)))).fetchall()
+        # Probe references only for expired receipts. Building one UNION of all
+        # references read the entire retained tape, even when no raw is expired.
+        from psycopg import sql
+        pins = []
+        for table in ('surveillance_observations','surveillance_wallet_events','surveillance_markets',
+                      'surveillance_aggregates','surveillance_walks','surveillance_wallet_profiles','surveillance_cases'):
+            column = 'metadata_raw_ids' if table=='surveillance_markets' else 'evidence_raw_ids' if table=='surveillance_cases' else 'raw_ids'
+            pins.append(sql.SQL('NOT EXISTS(SELECT 1 FROM {} p WHERE {} @> ARRAY[r.id])').format(
+                sql.Identifier(table),sql.Identifier(column)))
+        for table in ('surveillance_wallet_daily_parts','surveillance_markets','surveillance_rules',
+                      'surveillance_trades','surveillance_information'):
+            pins.append(sql.SQL('NOT EXISTS(SELECT 1 FROM {} p WHERE p.raw_id=r.id)').format(sql.Identifier(table)))
+        deleted = await (await c.execute(sql.SQL("""WITH expired AS (
+            SELECT id FROM surveillance_raw r WHERE received_at<%s AND {} ORDER BY received_at,id LIMIT %s
+        ) DELETE FROM surveillance_raw WHERE id IN(SELECT id FROM expired) RETURNING path""").format(
+            sql.SQL(' AND ').join(pins)), (evidence_cutoff,min(limit,10000)))).fetchall()
         paths = sorted({r["path"] for r in deleted})
         used = await (await c.execute("SELECT DISTINCT path FROM surveillance_raw WHERE path=ANY(%s)", (paths,))).fetchall()
         keep = {r["path"] for r in used}
