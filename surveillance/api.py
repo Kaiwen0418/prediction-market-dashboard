@@ -80,6 +80,17 @@ def create_app(settings=None):
         await store.fetch("SELECT 1")
         return {"status": "ok", "collection_mode": "REST", "analysis_mode": settings.mode, "trading": False}
 
+    @app.get('/wallets/{wallet}/timing')
+    async def wallet_timing(wallet: str):
+        import re
+        if not re.fullmatch(r'0x[0-9a-fA-F]{40}',wallet):
+            raise HTTPException(422,'Valid public wallet required')
+        from .wallet_timing import patterns
+        try:
+            return await patterns(store,wallet.lower())
+        except ValueError as exc:
+            raise HTTPException(413,str(exc))
+
     @app.get('/retrospectives')
     async def retrospectives(after: str = '', limit: int = Query(50,ge=1,le=200)):
         rows=await store.fetch("""SELECT id,venue,market_id,status,known_at,

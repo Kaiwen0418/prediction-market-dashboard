@@ -218,6 +218,8 @@ async def run(worker,job):
         await worker.store.fence(c,job)
         await c.execute('''INSERT INTO surveillance_review_slices(id,review_id,lower_time,upper_time,document)
             VALUES(%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''',(key,review['id'],lo,hi,Jsonb(report)))
+        from .wallet_timing import persist
+        await persist(c,key,trades,lo.isoformat(),hi.isoformat())
         await c.execute("UPDATE surveillance_retrospectives SET status='analyzing' WHERE id=%s",(review['id'],))
         await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
     return 15
