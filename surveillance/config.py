@@ -9,7 +9,7 @@ class Settings:
     raw_dir: Path
     mode: str = "retrospective"
     research_retention_days: int = 90
-    research_tape_max_bytes: int = 2 * 1024**3
+    research_tape_max_bytes: int = 10 * 1024**3
     research_summary_max_bytes: int = 512 * 1024**2
     review_lookback_days: int = 30
     review_max_pages: int = 32
@@ -23,8 +23,8 @@ class Settings:
     replay_max_trades: int = 50000
     retention_days: int = 7
     case_cooldown_seconds: int = 3600
-    database_max_bytes: int = 20 * 1024**3
-    raw_max_bytes: int = 5 * 1024**3
+    database_max_bytes: int = 40 * 1024**3
+    raw_max_bytes: int = 15 * 1024**3
     automatic_min_cash_usd: float = 1000
     detail_seconds: int = 1800
     end_grace_hours: int = 6
@@ -41,7 +41,7 @@ class Settings:
             database_url=os.environ["SURVEILLANCE_DATABASE_URL"],
             mode=os.getenv("SURVEILLANCE_MODE","retrospective"),
             research_retention_days=int(os.getenv("SURVEILLANCE_RESEARCH_RETENTION_DAYS","90")),
-            research_tape_max_bytes=int(os.getenv("SURVEILLANCE_RESEARCH_TAPE_MAX_BYTES",str(2*1024**3))),
+            research_tape_max_bytes=int(os.getenv("SURVEILLANCE_RESEARCH_TAPE_MAX_BYTES",str(10*1024**3))),
             research_summary_max_bytes=int(os.getenv("SURVEILLANCE_RESEARCH_SUMMARY_MAX_BYTES",str(512*1024**2))),
             review_lookback_days=int(os.getenv("SURVEILLANCE_REVIEW_LOOKBACK_DAYS","30")),
             review_max_pages=int(os.getenv("SURVEILLANCE_REVIEW_MAX_PAGES","32")),
@@ -55,8 +55,8 @@ class Settings:
             automatic_min_cash_usd=float(os.getenv("SURVEILLANCE_AUTOMATIC_MIN_CASH_USD", "1000")),
             contracts_per_venue=int(os.getenv("SURVEILLANCE_CONTRACTS", "100")),
             api_token=os.getenv("SURVEILLANCE_API_TOKEN", ""),
-            database_max_bytes=int(os.getenv("SURVEILLANCE_DATABASE_MAX_BYTES", str(20 * 1024**3))),
-            raw_max_bytes=int(os.getenv("SURVEILLANCE_RAW_MAX_BYTES", str(5 * 1024**3))),
+            database_max_bytes=int(os.getenv("SURVEILLANCE_DATABASE_MAX_BYTES", str(40 * 1024**3))),
+            raw_max_bytes=int(os.getenv("SURVEILLANCE_RAW_MAX_BYTES", str(15 * 1024**3))),
             retention_days=int(os.getenv("SURVEILLANCE_RETENTION_DAYS", "7")),
             replay_max_trades=int(os.getenv("SURVEILLANCE_REPLAY_MAX_TRADES", "50000")),
         )

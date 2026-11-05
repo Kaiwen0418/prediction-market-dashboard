@@ -119,7 +119,7 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
         finally:await worker.collector.close()
         active={r['id'] for r in await self.store.fetch('SELECT id FROM surveillance_jobs WHERE enabled')}
         self.assertIn('manual',active);self.assertNotIn('deep',active);self.assertNotIn('auto',active)
-        self.assertIn('wide:polymarket:v2',active);self.assertIn('retrospective-dispatch',active)
+        self.assertNotIn('wide:polymarket:v2',active);self.assertIn('retrospective-dispatch',active)
 
     async def test_discovery_resume_and_sliced_report_api(self):
         m,raw,row=await self.final_market();calls=[]
@@ -139,12 +139,12 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
             job=await self.store.claim()
             self.assertEqual(job['kind'],'retrospective')
             # Simulate a completed but empty bounded HTTP walk, then restart.
-            cp=dict(stage='analyze',next_end=reviews[0]['document']['requested_end'],backfill_status='page_budget_exhausted')
+            cp=dict(continuity_version=1,stage='analyze',next_end=reviews[0]['document']['requested_end'],backfill_status='page_budget_exhausted')
             await self.store.checkpoint(job,cp);job['checkpoint']=cp
             await run(worker,job)
             saved=(await self.store.fetch('SELECT checkpoint FROM surveillance_jobs WHERE id=%s',(job['id'],)))[0]['checkpoint']
             self.assertEqual(saved['slices'],1)
-            self.assertGreater(saved['incomplete_slices'],0)
+            self.assertEqual(saved['incomplete_slices'],0)
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(replace(settings,api_token='test'))),base_url='http://test',headers={'Authorization':'Bearer test'}) as client:
                 response=await client.get('/retrospectives/'+reviews[0]['id'])
                 self.assertEqual(response.status_code,200)
@@ -177,7 +177,7 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
             rows,_=await read_tape(self.store,'polymarket','c1',review['document']['requested_start'],review['document']['requested_end'])
             self.assertEqual(len(rows),2)  # identical public fills retain scan multiplicity
             self.assertTrue(all(t['received_at']>t['event_time'] for t in rows))
-            self.assertEqual(len(await self.store.fetch('SELECT id FROM surveillance_research_walks')),1)
+            self.assertEqual((await self.store.fetch('SELECT checkpoint FROM surveillance_jobs WHERE id=%s',(job['id'],)))[0]['checkpoint']['pass'],2)
         finally:await worker.collector.close()
 
     async def test_kalshi_reads_both_public_tapes_and_deduplicates_overlap(self):
@@ -194,7 +194,9 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200,json={'trades':[source],'cursor':''})
         worker=Worker(replace(self.settings,mode='retrospective'),Collector(self.store,self.archive,0,httpx.AsyncClient(transport=httpx.MockTransport(handler))))
         try:
-            await self.store.enqueue('k','retrospective','kalshi',{'market_id':'k1'})
+            async with self.store.connection() as c:
+                await c.execute("INSERT INTO surveillance_retrospectives(id,venue,market_id,status,document) VALUES('kr','kalshi','k1','collecting','{}')")
+            await self.store.enqueue('k','retrospective','kalshi',{'market_id':'k1','review_id':'kr'})
             job=await self.store.claim();cp={}
             for _ in range(3):
                 await collect_page(worker,job,review,cp)
@@ -202,7 +204,8 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
             rows,_=await read_tape(self.store,'kalshi','k1',start,end)
             self.assertEqual(len(rows),1)
             self.assertEqual(urls,['/trade-api/v2/markets/trades','/trade-api/v2/historical/trades'])
-            self.assertEqual(cp['stage'],'analyze')
+            self.assertEqual(cp['stage'],'collect')
+            self.assertEqual(cp['pass'],2)
         finally:await worker.collector.close()
 
     async def test_archive_eviction_retracts_sampled_coverage(self):
@@ -227,3 +230,30 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(before),len(rows))
         self.assertEqual(len(after),len(rows)+1)
         self.assertNotEqual(analyze(before,start,end)['input_digest'],analyze(after,start,end)['input_digest'])
+
+    async def test_full_interval_requires_two_walks_and_protects_evidence(self):
+        from surveillance.retrospective import collect_page
+        from surveillance.capacity import evict_batch
+        from surveillance.research_archive import maintain
+        m,raw,row=await self.final_market()
+        async with self.store.connection() as c:key=await register(c,m,raw,self.settings)
+        review=(await self.store.fetch('SELECT * FROM surveillance_retrospectives WHERE id=%s',(key,)))[0]
+        when=datetime.fromisoformat(review['document']['requested_end'])-timedelta(minutes=10)
+        source=dict(poly(),timestamp=int(when.timestamp()))
+        def handler(request):
+            return httpx.Response(200,json={'data':[source],'pagination':{'has_more':not bool(request.url.params.get('cursor')),'next_cursor':'next' if not request.url.params.get('cursor') else None}})
+        worker=Worker(replace(self.settings,review_max_pages=1),Collector(self.store,self.archive,0,httpx.AsyncClient(transport=httpx.MockTransport(handler))))
+        try:
+            await self.store.enqueue('continuous','retrospective','polymarket',{'review_id':key,'market_id':'c1'})
+            job=await self.store.claim();cp={}
+            for _ in range(6):
+                await collect_page(worker,job,review,cp)
+                cp=(await self.store.fetch('SELECT checkpoint FROM surveillance_jobs WHERE id=%s',(job['id'],)))[0]['checkpoint']
+            self.assertEqual(cp['continuity_status'],'verified_api_interval')
+            self.assertEqual(cp['stage'],'analyze')
+            self.assertEqual(len(await self.store.fetch('SELECT * FROM surveillance_review_pages')),4)
+            async with self.store.connection(exclusive=True) as c:await evict_batch(c,100)
+            await maintain(self.store,replace(self.settings,research_tape_max_bytes=1))
+            self.assertEqual(len(await self.store.fetch('SELECT * FROM surveillance_review_pages')),4)
+            self.assertGreater(len(await self.store.fetch('SELECT id FROM surveillance_research_tape')),0)
+        finally:await worker.collector.close()

@@ -7,7 +7,7 @@ from psycopg import sql
 
 from .normalization import digest, now
 
-TABLES = ('surveillance_wallet_timing','surveillance_research_tape','surveillance_research_walks',
+TABLES = ('surveillance_review_pages','surveillance_wallet_timing','surveillance_research_tape','surveillance_research_walks',
           'surveillance_retrospectives','surveillance_review_slices')
 FIELDS = ('id','event_time','received_at','outcome','token_id','price','quantity',
           'direction','wallet','cash_price','cash_notional','is_block_trade')
@@ -95,8 +95,14 @@ async def maintain(store,settings,force=False):
         for table in ('surveillance_research_tape','surveillance_research_walks','surveillance_retrospectives'):
             over=force or (sizes['tape']>=settings.research_tape_max_bytes if table=='surveillance_research_tape'
                           else sizes['summaries']>=settings.research_summary_max_bytes)
-            query=sql.SQL('DELETE FROM {} WHERE id IN(SELECT id FROM {} WHERE {} ORDER BY known_at,id LIMIT 500) RETURNING ' + ('id,venue,market_id,lower_time,upper_time' if table=='surveillance_research_tape' else 'id')).format(
-                sql.Identifier(table),sql.Identifier(table),sql.SQL('true') if over else sql.SQL('known_at<%s'))
+            condition = 'true' if over else 'known_at<%s'
+            if table == 'surveillance_research_tape':
+                condition += ' AND NOT EXISTS(SELECT 1 FROM surveillance_review_pages p WHERE p.raw_id=surveillance_research_tape.raw_id)'
+            elif table == 'surveillance_retrospectives' and over:
+                condition += ' AND NOT EXISTS(SELECT 1 FROM surveillance_review_pages p WHERE p.review_id=surveillance_retrospectives.id)'
+            columns = 'id,venue,market_id,lower_time,upper_time' if table == 'surveillance_research_tape' else 'id'
+            query=sql.SQL('DELETE FROM {} WHERE id IN(SELECT id FROM {} WHERE {} ORDER BY known_at,id LIMIT 500) RETURNING '+columns).format(
+                sql.Identifier(table),sql.Identifier(table),sql.SQL(condition))
             expired=await (await c.execute(query,() if over else (cutoff,))).fetchall()
             removed[table]=len(expired)
             if table=='surveillance_research_tape' and expired:

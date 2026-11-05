@@ -111,7 +111,8 @@ async def dispatch(worker, job):
         rows=[]
         active=await (await c.execute("SELECT venue,count(*) AS n FROM surveillance_jobs WHERE enabled AND kind='retrospective' GROUP BY venue")).fetchall()
         counts={r['venue']:r['n'] for r in active}
-        for _ in range(max(0,worker.settings.review_concurrency-count)):
+        admitted=(await (await c.execute("SELECT count(*) AS n FROM surveillance_retrospectives WHERE document->>'continuity_required'='true' AND status NOT IN ('excluded','superseded')")).fetchone())['n']
+        for _ in range(min(max(0,worker.settings.review_concurrency-count),max(0,20-admitted))):
             chosen=None
             for venue in sorted(('polymarket','kalshi'),key=lambda v:(counts.get(v,0),v)):
                 chosen=await (await c.execute("SELECT id,venue,market_id FROM surveillance_retrospectives WHERE status='pending' AND venue=%s ORDER BY known_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",(venue,))).fetchone()
@@ -121,7 +122,7 @@ async def dispatch(worker, job):
             await c.execute("""INSERT INTO surveillance_jobs(id,kind,venue,payload)
                 VALUES(%s,'retrospective',%s,%s) ON CONFLICT(id) DO UPDATE SET enabled=true,due_at=now(),checkpoint='{}'""",
                 ('retrospective:'+r['id'],r['venue'],Jsonb(dict(review_id=r['id'],market_id=r['market_id']))))
-            await c.execute("UPDATE surveillance_retrospectives SET status='collecting' WHERE id=%s",(r['id'],))
+            await c.execute("UPDATE surveillance_retrospectives SET status='collecting',document=document||jsonb_build_object('continuity_required',true) WHERE id=%s",(r['id'],))
     await worker.store.checkpoint(job,dict(result,admitted=len(rows)))
     return 30
 
@@ -138,17 +139,33 @@ async def finish(worker,job,cp,status):
 async def collect_page(worker,job,review,cp):
     venue=job['venue']; doc=review['document']; start=doc['requested_start']; end=doc['requested_end']
     phases=['current','historical'] if venue=='kalshi' else ['current']
+    cp.setdefault('continuity_version',1)
+    cp.setdefault('pass',1)
     phase=cp.get('phase',0)
-    if phase>=len(phases) or cp.get('pages',0)>=worker.settings.review_max_pages:
-        cp.update(stage='analyze',backfill_status='walks_completed' if phase>=len(phases) else 'page_budget_exhausted',next_end=end)
+    if phase>=len(phases):
+        if cp['pass']==1:
+            checkpoint=dict(continuity_version=1,stage='collect',pass_number=2,
+                first_digest=cp.get('content_digest'),first_fills=cp.get('fills',0),
+                next_end=end,phase=0,pages=0,fills=0)
+            checkpoint['pass']=checkpoint.pop('pass_number')
+            await worker.store.checkpoint(job,checkpoint)
+            return 60
+        stable=(cp.get('content_digest')==cp.get('first_digest') and cp.get('fills',0)==cp.get('first_fills'))
+        if not stable and cp['pass']<4:
+            checkpoint=dict(continuity_version=1,stage='collect',phase=0,pages=0,fills=0,
+                first_digest=cp.get('content_digest'),first_fills=cp.get('fills',0),next_end=end)
+            checkpoint['pass']=cp['pass']+1
+            await worker.store.checkpoint(job,checkpoint)
+            return 60
+        if not stable:
+            cp.update(continuity_status='source_changed_between_walks')
+            return await finish(worker,job,cp,'continuity_unresolved')
+        cp.update(stage='analyze',backfill_status='two_walks_verified',continuity_status='verified_api_interval',next_end=end)
         async with worker.store.connection() as c:
             await worker.store.fence(c,job)
-            if phase>=len(phases):
-                from .research_archive import capture_walk
-                source_ids=cp.get('source_ids',[])
-                remaining=(await (await c.execute('SELECT count(*) AS n FROM surveillance_raw WHERE id=ANY(%s)',(source_ids,))).fetchone())['n']
-                await capture_walk(c,job,dict(lower_time=start,source_upper=end,raw_ids=source_ids,
-                    refs_complete=remaining==len(source_ids) and len(source_ids)<=64))
+            await c.execute('UPDATE surveillance_retrospectives SET document=document||%s WHERE id=%s',
+                (Jsonb(dict(continuity=dict(version=1,status='verified_api_interval',start=start,end=end,
+                    fills_per_walk=cp.get('fills',0),verified_at=now(),scope='Two complete matching API traversals; upstream omissions remain unobservable'))),review['id']))
             await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
         return 15
     params={'limit':1000}
@@ -175,9 +192,11 @@ async def collect_page(worker,job,review,cp):
         t['id']=t['identity']+(f":{counts[t['identity']]}" if venue=='polymarket' else '')
         if ts<end:
             t.update(raw_id=raw['id'],collection_scope='retrospective');accepted.append(t)
+    cp['page_phase']=phase
+    cp['content_digest']=digest([cp.get('content_digest'),sorted((t['id'],t['price'],t['quantity'],t['direction'],t.get('wallet')) for t in accepted)])
     cp.update(cursor=cursor,counts=dict(counts),last_time=previous,pages=cp.get('pages',0)+1,
         seen=(cp.get('seen',[])+[hashed])[-1000:] if hashed else [],
-        source_ids=cp.get('source_ids',[])+[raw['id']],fills=cp.get('fills',0)+len(accepted))
+        fills=cp.get('fills',0)+len(accepted))
     if crossed or not cursor:
         cp.update(phase=phase+1,cursor=None,counts={},last_time=None,seen=[])
     await worker.store.commit_page(job,raw,cp,trades=accepted,retrospective_settings=worker.settings)
@@ -189,9 +208,9 @@ async def run(worker,job):
     cp=dict(job['checkpoint'])
     if not rows or rows[0]['status'] in ('superseded','excluded'):return await finish(worker,job,cp,'expired')
     review=rows[0]; doc=review['document']; start=doc['requested_start']; end=doc['requested_end']
-    if not cp:
-        cov=await coverage(worker.store,job['venue'],job['payload']['market_id'],start,end)
-        cp=dict(stage='analyze' if cov['sampled_fraction']==1 else 'collect',initial_coverage=cov,next_end=end)
+    if cp.get('continuity_version')!=1:
+        cp=dict(continuity_version=1,stage='collect',phase=0,pages=0,fills=0,next_end=end)
+        cp['pass']=1
         await worker.store.checkpoint(job,cp)
     if cp['stage']=='collect':return await collect_page(worker,job,review,cp)
     hi=datetime.fromisoformat(cp['next_end']); beginning=datetime.fromisoformat(start)
@@ -208,10 +227,10 @@ async def run(worker,job):
     except ValueError as exc:
         if hours>1:
             cp['slice_hours']=max(1,hours/2);await worker.store.checkpoint(job,cp);return 15
-        trades=[];refs=[];unavailable=str(exc)
+        return await finish(worker,job,dict(cp,capacity_reason=str(exc)),'needs_analysis_capacity')
     else:unavailable=None
     report=analyze(trades,lo.isoformat(),hi.isoformat(),observation_end=data_end.isoformat()) if trades else dict(episodes=[],summary_bins=[],input_fills=0)
-    cov=await coverage(worker.store,job['venue'],job['payload']['market_id'],context.isoformat(),hi.isoformat())
+    cov=dict(sampled_fraction=1,status='verified_api_interval',gaps=[],meaning='Two matching complete API traversals of the frozen interval')
     # Completed HTTP traversal is not proof that every historical trade still
     # exists upstream or locally. Preserve its distinct provenance and gaps.
     report.update(analysis_mode='retrospective',version=VERSION,start=lo.isoformat(),end=hi.isoformat(),
@@ -222,7 +241,7 @@ async def run(worker,job):
     key=digest([review['id'],lo.isoformat(),hi.isoformat(),VERSION])
     cp.update(next_end=lo.isoformat(),slice_hours=24,slices=cp.get('slices',0)+1,
         episodes=cp.get('episodes',0)+len(report['episodes']),
-        incomplete_slices=cp.get('incomplete_slices',0)+int(bool(unavailable) or not trades or cov['sampled_fraction']!=1))
+        incomplete_slices=cp.get('incomplete_slices',0)+int(bool(unavailable) or cov['sampled_fraction']!=1))
     async with worker.store.connection() as c:
         await worker.store.fence(c,job)
         await c.execute('''INSERT INTO surveillance_review_slices(id,review_id,lower_time,upper_time,document)

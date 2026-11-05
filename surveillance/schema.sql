@@ -270,3 +270,12 @@ DROP TRIGGER IF EXISTS surveillance_wallet_timing_account ON surveillance_wallet
 CREATE TRIGGER surveillance_wallet_timing_account AFTER INSERT OR UPDATE OR DELETE ON surveillance_wallet_timing
  FOR EACH ROW EXECUTE FUNCTION surveillance_research_account();
 INSERT INTO surveillance_schema VALUES(8) ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS surveillance_review_pages (
+ review_id text NOT NULL REFERENCES surveillance_retrospectives(id) ON DELETE CASCADE,
+ pass integer NOT NULL, phase integer NOT NULL, page integer NOT NULL,
+ raw_id text NOT NULL REFERENCES surveillance_raw(id),
+ PRIMARY KEY(review_id,pass,phase,page)
+);
+CREATE INDEX IF NOT EXISTS surveillance_review_pages_raw ON surveillance_review_pages(raw_id);
+INSERT INTO surveillance_schema VALUES(9) ON CONFLICT DO NOTHING;

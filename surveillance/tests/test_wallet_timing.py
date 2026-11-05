@@ -52,7 +52,7 @@ class TimingStorageTests(unittest.IsolatedAsyncioTestCase):
         from surveillance.wallet_timing import persist,patterns
         rows,start,end=tape()
         async with self.store.connection() as c:
-            await c.execute("INSERT INTO surveillance_retrospectives(id,venue,market_id,status,document) VALUES('review','polymarket','c1','complete_observed','{\"market\":{\"event_ids\":[\"e1\"]}}')")
+            await c.execute("INSERT INTO surveillance_retrospectives(id,venue,market_id,status,document) VALUES('review','polymarket','c1','complete_observed','{\"continuity\":{\"status\":\"verified_api_interval\"},\"market\":{\"event_ids\":[\"e1\"]}}')")
             await c.execute("INSERT INTO surveillance_review_slices(id,review_id,lower_time,upper_time,document) VALUES('slice','review',%s,%s,'{}')",(start,end))
             await persist(c,'slice',rows,start,end)
             await persist(c,'slice',rows,start,end)

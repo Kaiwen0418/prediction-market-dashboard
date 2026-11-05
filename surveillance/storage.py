@@ -137,6 +137,10 @@ class Store:
         async with self.connection() as c:
             await self.fence(c, job)
             await self.insert_raw(c, raw)
+            if job['kind']=='retrospective' and checkpoint.get('continuity_version')==1:
+                await c.execute("""INSERT INTO surveillance_review_pages VALUES(%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING""", (job['payload']['review_id'],checkpoint['pass'],
+                    checkpoint['page_phase'],checkpoint['pages'],raw['id']))
             for m in markets:
                 # The hot catalog is an index, never a second copy of rule prose.
                 index = {k: v for k, v in m.items() if k not in ("rules", "tokens")}
