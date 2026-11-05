@@ -9,16 +9,14 @@ it is **not the complete investigation system described in the roadmap**.
 
 The default `SURVEILLANCE_MODE=retrospective` stops automatic deep selection,
 online anomaly/scout detection, online wallet-pattern jobs and online aggregates.
-The shared market catalog now receives closed/settled discoveries. Global REST
-trade collection remains active to preserve inputs for later settlement reviews.
+The shared market catalog now receives closed/settled discoveries. Global REST collection and hot-data bootstrap are disabled in this mode. Selected markets receive complete fixed-window API walks and an independent verification walk.
 There is no 100-contract eligibility gate for retrospective reviews.
 
-Compact normalized tape survives hot raw-response FIFO, within separate 2 GiB
+Compact normalized tape survives hot raw-response FIFO, within separate 10 GiB
 archive / 512 MiB summary admission budgets and 90-day retention. These are inside
 the existing total database budget, not additional disk allocation or guaranteed
 history duration. Missing original responses are exposed separately from normalized
-replay availability. Retrospective jobs backfill at most 32 pages and analyze at most
-30 days per market, with explicit gaps, limits and settlement versions.
+replay availability. Retrospective jobs resume without a total page cap over at most 30 days. Two matching API traversals gate analysis. At most 20 selected dossiers retain protected page inputs. Global budgets are 40 GiB database and 15 GiB raw files. See the continuity notes for source and analysis limits.
 
 See [current design, API and limits](../docs/research/retrospective-2026-11-04.md).
 The implementation notes below describe **legacy online mode and shared components**;

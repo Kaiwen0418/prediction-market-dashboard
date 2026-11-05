@@ -133,7 +133,8 @@ def create_app(settings=None):
             s['document']['normalized_replay_available']=None
             s['document']['current_archive_fragments']=tape[0]['n']
             s['document']['replay_note']='Use replay endpoint to verify the input digest; surviving fragments alone do not prove completeness'
-        return dict(review=rows[0],settlement_raw_available=rows[0]['document']['raw_id'] in available,
+        pages=await store.fetch('SELECT pass,count(*) AS pages FROM surveillance_review_pages WHERE review_id=%s GROUP BY pass ORDER BY pass',(review_id,))
+        return dict(continuity=rows[0]['document'].get('continuity',{'status':'legacy_unverified'}),page_manifest=pages,review=rows[0],settlement_raw_available=rows[0]['document']['raw_id'] in available,
             slices=slices,next_after=slices[-1]['id'] if len(slices)==limit else None)
 
     @app.get('/retrospectives/{review_id}/report',response_class=PlainTextResponse)

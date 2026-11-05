@@ -55,7 +55,7 @@ async def prune(store, days=7, limit=50000):
             pins.append(sql.SQL('NOT EXISTS(SELECT 1 FROM {} p WHERE {} @> ARRAY[r.id])').format(
                 sql.Identifier(table),sql.Identifier(column)))
         for table in ('surveillance_wallet_daily_parts','surveillance_markets','surveillance_rules',
-                      'surveillance_trades','surveillance_information'):
+                      'surveillance_trades','surveillance_information','surveillance_review_pages'):
             pins.append(sql.SQL('NOT EXISTS(SELECT 1 FROM {} p WHERE p.raw_id=r.id)').format(sql.Identifier(table)))
         deleted = await (await c.execute(sql.SQL("""WITH expired AS (
             SELECT id FROM surveillance_raw r WHERE received_at<%s AND {} ORDER BY received_at,id LIMIT %s

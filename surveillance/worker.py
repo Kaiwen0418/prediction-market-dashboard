@@ -36,14 +36,15 @@ class Worker:
                     AND (NOT COALESCE((payload->>'manual')::boolean,false) OR payload->>'lookup'='true' OR payload->>'trigger'='wide_feed' OR payload->>'reason' IN ('restore omitted catalog metadata','verified event settlement refresh'))""")
                 await c.execute("UPDATE surveillance_jobs SET enabled=false WHERE kind='catalog' AND enabled")
             for venue in ('polymarket','kalshi'):
-                await self.store.enqueue(f'wide:{venue}:v2','wide',venue,{'scope':'global'})
+
                 await self.store.enqueue(f'settlements:{venue}','settlement_discovery',venue,{})
                 await self.store.enqueue(f'settlements:{venue}:head','settlement_discovery',venue,{'head':True})
             await self.store.enqueue('settlements:kalshi:archive','settlement_discovery','kalshi',{'archive':True})
             async with self.store.connection() as c:
                 await c.execute("UPDATE surveillance_jobs SET enabled=false WHERE enabled AND kind='wallet_timing_backfill' AND id<>'wallet-timing-backfill:v9'")
             await self.store.enqueue('wallet-timing-backfill:v9','wallet_timing_backfill','polymarket',{})
-            await self.store.enqueue('research-bootstrap:v7','research_bootstrap','system',{})
+            async with self.store.connection() as c:
+                await c.execute("UPDATE surveillance_jobs SET enabled=false WHERE enabled AND kind IN ('wide','research_bootstrap')")
             await self.store.enqueue('retrospective-dispatch','retrospective_dispatch','system',{})
             await self.store.enqueue('maintenance','maintenance','system',{})
             return
@@ -444,14 +445,8 @@ class Worker:
             if job['kind']=='retrospective' and job['failures']>=2:
                 saved=await self.store.fetch('SELECT checkpoint FROM surveillance_jobs WHERE id=%s',(job['id'],))
                 cp=saved[0]['checkpoint']
-                if cp.get('stage')!='analyze':
-                    review=await self.store.fetch('SELECT document FROM surveillance_retrospectives WHERE id=%s',(job['payload']['review_id'],))
-                    if review:
-                        cp.update(stage='analyze',next_end=review[0]['document']['requested_end'],backfill_status='source_error',source_error=type(exc).__name__)
-                        await self.store.checkpoint(job,cp)
-                else:
-                    from .retrospective import finish
-                    await finish(self,job,dict(cp,analysis_error=type(exc).__name__),'unavailable')
+                from .retrospective import finish
+                await finish(self,job,dict(cp,source_error=type(exc).__name__),'continuity_unresolved')
             await self.store.release(job, max(backoff, getattr(exc, "retry_after", 0)), reason)
         return True
 

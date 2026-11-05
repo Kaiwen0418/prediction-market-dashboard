@@ -58,7 +58,7 @@ async def evict_batch(c, limit=500, changed=None):
     discovery cursors so a large closed catalog does not restart from page one.
     """
     changed=changed if changed is not None else set()
-    rows = await (await c.execute("SELECT id,path,received_at FROM surveillance_raw ORDER BY received_at,id LIMIT %s",
+    rows = await (await c.execute("SELECT id,path,received_at FROM surveillance_raw r WHERE NOT EXISTS(SELECT 1 FROM surveillance_review_pages p WHERE p.raw_id=r.id) ORDER BY received_at,id LIMIT %s",
                                   (limit,))).fetchall()
     if not rows:
         return 0

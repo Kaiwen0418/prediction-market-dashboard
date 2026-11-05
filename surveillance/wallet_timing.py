@@ -77,6 +77,7 @@ async def patterns(store, wallet, horizon=3600):
         JOIN surveillance_review_slices s ON s.id=w.slice_id
         JOIN surveillance_retrospectives r ON r.id=s.review_id
         WHERE w.wallet=%s AND r.status IN ('complete_observed','complete_with_gaps')
+        AND r.document->'continuity'->>'status'='verified_api_interval'
         ORDER BY r.known_at,r.id,s.lower_time LIMIT 5001''', (wallet,))
     if len(rows) > 5000:
         raise ValueError('Wallet query exceeds 5000 slices')
