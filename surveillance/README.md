@@ -16,7 +16,7 @@ Compact normalized tape survives hot raw-response FIFO, within separate 10 GiB
 archive / 512 MiB summary admission budgets and 90-day retention. These are inside
 the existing total database budget, not additional disk allocation or guaranteed
 history duration. Missing original responses are exposed separately from normalized
-replay availability. Retrospective jobs resume without a total page cap over at most 30 days. Two matching API traversals gate analysis. At most 20 selected dossiers retain protected page inputs. Global budgets are 40 GiB database and 15 GiB raw files. See the continuity notes for source and analysis limits.
+replay availability. Retrospective jobs resume without a total page cap over at most 30 days. Two matching API traversals gate analysis. Selected dossiers retain protected page inputs. Admission floats with storage headroom and reserves working room for at most two in-flight reviews. Global budgets are 40 GiB database and 15 GiB raw files. See the continuity notes for source and analysis limits.
 
 See [current design, API and limits](../docs/research/retrospective-2026-11-04.md).
 The implementation notes below describe **legacy online mode and shared components**;

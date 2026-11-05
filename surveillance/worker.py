@@ -30,6 +30,7 @@ class Worker:
         if self.settings.mode=='retrospective':
             # Preserve manual investigations; stop the automatic online workload.
             async with self.store.connection() as c:
+                await c.execute("UPDATE surveillance_retrospectives SET status='no_observed_trades' WHERE status IN ('complete_observed','complete_with_gaps') AND document->'continuity'->>'fills_per_walk'='0'")
                 await c.execute("""UPDATE surveillance_jobs SET enabled=false
                     WHERE enabled AND kind IN ('schedule','detect','scout_detect','candidate_scan',
                     'slow_wallets','wallet_results','wallet_rollup_backfill','cash_bootstrap','aggregates','trades','details','wallet')
