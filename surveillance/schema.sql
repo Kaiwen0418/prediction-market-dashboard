@@ -261,3 +261,12 @@ DO $$ DECLARE tab text; BEGIN
  END IF;
  END LOOP;
 END $$;
+CREATE TABLE IF NOT EXISTS surveillance_wallet_timing (
+ slice_id text NOT NULL REFERENCES surveillance_review_slices(id) ON DELETE CASCADE,
+ wallet text NOT NULL, document jsonb NOT NULL, PRIMARY KEY(slice_id,wallet)
+);
+CREATE INDEX IF NOT EXISTS surveillance_wallet_timing_lookup ON surveillance_wallet_timing(wallet,slice_id);
+DROP TRIGGER IF EXISTS surveillance_wallet_timing_account ON surveillance_wallet_timing;
+CREATE TRIGGER surveillance_wallet_timing_account AFTER INSERT OR UPDATE OR DELETE ON surveillance_wallet_timing
+ FOR EACH ROW EXECUTE FUNCTION surveillance_research_account();
+INSERT INTO surveillance_schema VALUES(8) ON CONFLICT DO NOTHING;

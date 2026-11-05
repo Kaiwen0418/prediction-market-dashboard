@@ -40,6 +40,7 @@ class Worker:
                 await self.store.enqueue(f'settlements:{venue}','settlement_discovery',venue,{})
                 await self.store.enqueue(f'settlements:{venue}:head','settlement_discovery',venue,{'head':True})
             await self.store.enqueue('settlements:kalshi:archive','settlement_discovery','kalshi',{'archive':True})
+            await self.store.enqueue('wallet-timing-backfill:v8','wallet_timing_backfill','polymarket',{})
             await self.store.enqueue('research-bootstrap:v7','research_bootstrap','system',{})
             await self.store.enqueue('retrospective-dispatch','retrospective_dispatch','system',{})
             await self.store.enqueue('maintenance','maintenance','system',{})
@@ -288,6 +289,9 @@ class Worker:
             elif job['kind']=='retrospective_dispatch':
                 from .retrospective import dispatch
                 delay=await dispatch(self,job)
+            elif job['kind']=='wallet_timing_backfill':
+                from .wallet_timing import backfill
+                delay=await backfill(self,job)
             elif job['kind']=='research_bootstrap':
                 from .research_archive import bootstrap
                 delay=await bootstrap(self,job)

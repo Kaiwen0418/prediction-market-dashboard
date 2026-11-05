@@ -7,7 +7,7 @@ from psycopg import sql
 
 from .normalization import digest, now
 
-TABLES = ('surveillance_research_tape','surveillance_research_walks',
+TABLES = ('surveillance_wallet_timing','surveillance_research_tape','surveillance_research_walks',
           'surveillance_retrospectives','surveillance_review_slices')
 FIELDS = ('id','event_time','received_at','outcome','token_id','price','quantity',
           'direction','wallet','cash_price','cash_notional','is_block_trade')
