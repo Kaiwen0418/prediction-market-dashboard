@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 from .leadlag import BIN, epoch
 
 
-def measure(trades, start, end):
+def measure(trades, start, end, horizon=3600):
     groups = defaultdict(list)
     for trade in trades:
         groups[trade.get('token_id') or trade['outcome']].append(trade)
@@ -29,8 +29,8 @@ def measure(trades, start, end):
             if not wallet or direction not in (-1, 1) or trade.get('is_block_trade') or not epoch(start) <= when < epoch(end):
                 continue
             totals[wallet]['eligible'] += 1
-            index = bisect_left(times, when + 3600)
-            if index == len(times) or times[index] > when + 3600 + BIN:
+            index = bisect_left(times, when + horizon)
+            if index == len(times) or times[index] > when + horizon + BIN:
                 continue
             value = direction * (prices[index] - float(trade['price']))
             key = (int(when // BIN), direction)
@@ -57,15 +57,21 @@ def measure(trades, start, end):
 
 
 async def persist(c, slice_id, trades, start, end):
-    metrics = measure(trades, start, end)
+    by_wallet = {}
+    for horizon in (300, 900, 3600):
+        for row in measure(trades, start, end, horizon):
+            wallet = row['wallet']
+            by_wallet.setdefault(wallet, {})[str(horizon)] = row
+    metrics = [dict(values['3600'], version=2, horizons=values) for values in by_wallet.values()]
     if metrics:
         async with c.cursor() as cursor:
             await cursor.executemany('''INSERT INTO surveillance_wallet_timing(slice_id,wallet,document)
-                VALUES(%s,%s,%s) ON CONFLICT DO NOTHING''',
+                VALUES(%s,%s,%s) ON CONFLICT(slice_id,wallet) DO UPDATE SET document=EXCLUDED.document
+                WHERE surveillance_wallet_timing.document IS DISTINCT FROM EXCLUDED.document''',
                 [(slice_id, row['wallet'], Jsonb(row)) for row in metrics])
 
 
-async def patterns(store, wallet):
+async def patterns(store, wallet, horizon=3600):
     rows = await store.fetch('''SELECT w.document,r.document->'market'->'event_ids' AS events,
         r.id AS review_id,s.id AS slice_id FROM surveillance_wallet_timing w
         JOIN surveillance_review_slices s ON s.id=w.slice_id
@@ -84,16 +90,19 @@ async def patterns(store, wallet):
         events[ids[0]].append(row)
     results = []
     for event, members in events.items():
-        documents = [m['document'] for m in members]
+        documents = [m['document'].get('horizons', {}).get(str(horizon),
+                     m['document'] if horizon == 3600 else None) for m in members]
+        documents = [d for d in documents if d is not None]
         observed = sum(d['observed'] for d in documents)
         controlled = sum(d['controlled'] for d in documents)
-        results.append(dict(event_id=event, reviews=len({m['review_id'] for m in members}),
+        unavailable = len(members)-len(documents)
+        results.append(dict(unavailable_horizon_slices=unavailable,event_id=event, reviews=len({m['review_id'] for m in members}),
             observed=observed, eligible=sum(d['eligible'] for d in documents),
             mean_price_change=sum(d['price_change_sum'] for d in documents)/observed if observed else None,
             controlled=controlled, mean_peer_excess=sum(d['excess_sum'] for d in documents)/controlled if controlled else None))
     positive = sum(r['mean_peer_excess'] is not None and r['mean_peer_excess'] > 0 for r in results)
     negative = sum(r['mean_peer_excess'] is not None and r['mean_peer_excess'] < 0 for r in results)
-    return dict(wallet=wallet, horizon_seconds=3600, events=results, independent_native_events=len(results),
+    return dict(wallet=wallet, horizon_seconds=horizon, events=results, independent_native_events=len(results),
         positive_peer_events=positive, negative_peer_events=negative, unmapped_slices=unmapped,
         sample_status='insufficient' if positive+negative < 5 else 'descriptive_sample',
         scope='All observed attributable trades in retained completed review slices, including adverse markouts',

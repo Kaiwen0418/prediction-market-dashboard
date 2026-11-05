@@ -81,13 +81,15 @@ def create_app(settings=None):
         return {"status": "ok", "collection_mode": "REST", "analysis_mode": settings.mode, "trading": False}
 
     @app.get('/wallets/{wallet}/timing')
-    async def wallet_timing(wallet: str):
+    async def wallet_timing(wallet: str, horizon: int = Query(3600)):
         import re
         if not re.fullmatch(r'0x[0-9a-fA-F]{40}',wallet):
             raise HTTPException(422,'Valid public wallet required')
+        if horizon not in (300,900,3600):
+            raise HTTPException(422,'Choose 300, 900 or 3600 seconds')
         from .wallet_timing import patterns
         try:
-            return await patterns(store,wallet.lower())
+            return await patterns(store,wallet.lower(),horizon)
         except ValueError as exc:
             raise HTTPException(413,str(exc))
 
