@@ -1,0 +1,93 @@
+[
+  {
+    "venue": "polymarket",
+    "market_id": "0x173b9e8b81314e0e71506c6ee31c40ce44d5c18e3bcc03bbccab2521ac795d10",
+    "title": "Bitcoin above 78,400 on November 4, 7AM ET?",
+    "status": "complete_observed",
+    "completion": {
+      "seen": [],
+      "fills": 10,
+      "pages": 1,
+      "phase": 1,
+      "stage": "analyze",
+      "counts": {},
+      "cursor": null,
+      "slices": 1,
+      "episodes": 0,
+      "next_end": "2026-11-04T10:40:03.940926+00:00",
+      "last_time": null,
+      "source_ids": [
+        "893cb7063056401bb230a3c4bcbe1bb0"
+      ],
+      "slice_hours": 24,
+      "completed_at": "2026-11-04T13:22:32.600925+00:00",
+      "backfill_status": "walks_completed",
+      "initial_coverage": {
+        "gaps": [
+          [
+            "2026-11-04T10:40:03.940926+00:00",
+            "2026-11-04T12:11:36.013765+00:00"
+          ]
+        ],
+        "status": "partial_or_unknown",
+        "meaning": "Historical REST walk coverage; archive eviction checked separately",
+        "gaps_omitted": 0,
+        "sampled_fraction": 0.0
+      },
+      "incomplete_slices": 0
+    },
+    "slices": [
+      {
+        "fills": "10",
+        "status": "observed_inputs",
+        "episodes": 0
+      }
+    ]
+  },
+  {
+    "venue": "kalshi",
+    "market_id": "KXAFCCLTOTAL-26NOV04POHGAM-7",
+    "title": "Will over 6.5 goals be scored?",
+    "status": "complete_observed",
+    "completion": {
+      "seen": [],
+      "fills": 248,
+      "pages": 2,
+      "phase": 2,
+      "stage": "analyze",
+      "counts": {},
+      "cursor": null,
+      "slices": 1,
+      "episodes": 0,
+      "next_end": "2026-11-04T11:35:13+00:00",
+      "last_time": null,
+      "source_ids": [
+        "e6cf67fd1c824540bb435227668cbb7e",
+        "434288d1951f456f96528122f2a379c1"
+      ],
+      "slice_hours": 24,
+      "completed_at": "2026-11-04T13:22:34.629902+00:00",
+      "backfill_status": "walks_completed",
+      "initial_coverage": {
+        "gaps": [
+          [
+            "2026-11-04T11:35:13+00:00",
+            "2026-11-04T12:09:05.645588+00:00"
+          ]
+        ],
+        "status": "partial_or_unknown",
+        "meaning": "Historical REST walk coverage; archive eviction checked separately",
+        "gaps_omitted": 0,
+        "sampled_fraction": 0.0
+      },
+      "incomplete_slices": 0
+    },
+    "slices": [
+      {
+        "fills": "248",
+        "status": "observed_inputs",
+        "episodes": 0
+      }
+    ]
+  }
+]

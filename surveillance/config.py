@@ -7,6 +7,13 @@ from pathlib import Path
 class Settings:
     database_url: str
     raw_dir: Path
+    mode: str = "retrospective"
+    research_retention_days: int = 90
+    research_tape_max_bytes: int = 2 * 1024**3
+    research_summary_max_bytes: int = 512 * 1024**2
+    review_lookback_days: int = 30
+    review_max_pages: int = 32
+    review_concurrency: int = 2
     contracts_per_venue: int = 100
     exploration_fraction: float = 0.2
     request_interval: float = 0.6
@@ -32,6 +39,13 @@ class Settings:
     def env(cls):
         return cls(
             database_url=os.environ["SURVEILLANCE_DATABASE_URL"],
+            mode=os.getenv("SURVEILLANCE_MODE","retrospective"),
+            research_retention_days=int(os.getenv("SURVEILLANCE_RESEARCH_RETENTION_DAYS","90")),
+            research_tape_max_bytes=int(os.getenv("SURVEILLANCE_RESEARCH_TAPE_MAX_BYTES",str(2*1024**3))),
+            research_summary_max_bytes=int(os.getenv("SURVEILLANCE_RESEARCH_SUMMARY_MAX_BYTES",str(512*1024**2))),
+            review_lookback_days=int(os.getenv("SURVEILLANCE_REVIEW_LOOKBACK_DAYS","30")),
+            review_max_pages=int(os.getenv("SURVEILLANCE_REVIEW_MAX_PAGES","32")),
+            review_concurrency=int(os.getenv("SURVEILLANCE_REVIEW_CONCURRENCY","2")),
             raw_dir=Path(os.getenv("SURVEILLANCE_RAW_DIR", "./surveillance-data")),
             poll_seconds=int(os.getenv('SURVEILLANCE_DEEP_POLL_SECONDS','900')),
             detail_seconds=int(os.getenv('SURVEILLANCE_DETAIL_SECONDS','1800')),
@@ -48,5 +62,7 @@ class Settings:
         )
 
     def __post_init__(self):
+        if self.mode not in ("retrospective","online") or not 1<=self.review_lookback_days<=90 or not 1<=self.review_max_pages<=64 or not 1<=self.review_concurrency<=4 or min(self.research_retention_days,self.research_tape_max_bytes,self.research_summary_max_bytes)<1:
+            raise ValueError("Invalid retrospective budget")
         if self.poll_seconds<1 or self.detail_seconds<1 or self.wide_poll_seconds<1 or self.wide_overlap_seconds<1 or self.pages_per_job<1 or self.deep_history_hours<1 or self.catalog_seconds < 1 or self.end_grace_hours < 0 or not 0 < self.automatic_min_cash_usd < float("inf") or self.database_max_bytes < 1 or self.raw_max_bytes < 1 or self.contracts_per_venue < 1 or self.retention_days < 1 or self.replay_max_trades < 1 or not 0 < self.exploration_fraction < 1:
             raise ValueError("Invalid collection budget")

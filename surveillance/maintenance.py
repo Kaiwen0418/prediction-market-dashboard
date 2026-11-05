@@ -87,7 +87,8 @@ async def reset_test_dataset(store, raw_dir):
     if root == Path(root.anchor) or len(root.parts) < 3:
         raise ValueError("Refusing a non-dedicated raw archive directory")
     async with store.connection(exclusive=True) as c:
-        tables = (*TABLES, "surveillance_jobs", "surveillance_capacity")
+        from .research_archive import TABLES as RESEARCH_TABLES
+        tables = (*TABLES, *RESEARCH_TABLES, "surveillance_research_budget", "surveillance_jobs", "surveillance_capacity")
         await c.execute(sql.SQL("TRUNCATE {} RESTART IDENTITY").format(
             sql.SQL(",").join(sql.Identifier(t) for t in tables)))
         await c.commit()

@@ -1,9 +1,29 @@
-# Market Surveillance — first implementation
+# Market Surveillance — retrospective review
 
 Independent Python/asyncio + FastAPI + PostgreSQL + Parquet service. No imports from
 `backend/app`, no existing market-scope filters, no frontend changes, and no order
 placement or trading credentials. This is the collection and investigation foundation;
 it is **not the complete investigation system described in the roadmap**.
+
+## Current deployment: retrospective mode (schema 7)
+
+The default `SURVEILLANCE_MODE=retrospective` stops automatic deep selection,
+online anomaly/scout detection, online wallet-pattern jobs and online aggregates.
+The shared market catalog now receives closed/settled discoveries. Global REST
+trade collection remains active to preserve inputs for later settlement reviews.
+There is no 100-contract eligibility gate for retrospective reviews.
+
+Compact normalized tape survives hot raw-response FIFO, within separate 2 GiB
+archive / 512 MiB summary admission budgets and 90-day retention. These are inside
+the existing total database budget, not additional disk allocation or guaranteed
+history duration. Missing original responses are exposed separately from normalized
+replay availability. Retrospective jobs backfill at most 32 pages and analyze at most
+30 days per market, with explicit gaps, limits and settlement versions.
+
+See [current design, API and limits](../docs/research/retrospective-2026-11-04.md).
+The implementation notes below describe **legacy online mode and shared components**;
+its deep selection, rolling detector and wallet jobs are not running in the default
+retrospective deployment. Historical validation counts are not current acceptance.
 
 ## Run locally
 
@@ -37,8 +57,8 @@ recovers after the five-minute database lease expires.
 
 ## Implemented
 
-- Independent unfiltered contract catalog: Polymarket keyset walks for **both open
-  and closed** markets; Kalshi market pagination. Preserve every returned contract,
+- Independent unfiltered contract catalog: active walks in legacy online mode;
+  closed/settled and historical walks in retrospective mode. Preserve every returned contract,
   every outcome/token and each changed rule snapshot, including reverted rules.
 - Read-only Polymarket **`/v2/trades`** and Kalshi REST collection. Fixed filters on
   every cursor page. Empty v2 pages with a next cursor continue; malformed envelopes,

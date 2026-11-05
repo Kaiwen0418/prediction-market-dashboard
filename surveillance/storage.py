@@ -133,7 +133,7 @@ class Store:
             await self.fence(c, job)
             await c.execute("UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s", (Jsonb(checkpoint), job["id"]))
 
-    async def commit_page(self, job, raw, checkpoint, markets=(), trades=(), detailed=True, catalog_expire_before=None, completed_walk=None):
+    async def commit_page(self, job, raw, checkpoint, markets=(), trades=(), detailed=True, catalog_expire_before=None, completed_walk=None, retrospective_settings=None, research_capture=True):
         async with self.connection() as c:
             await self.fence(c, job)
             await self.insert_raw(c, raw)
@@ -161,6 +161,9 @@ class Store:
                                ORDER BY observed_at DESC LIMIT 1) IS DISTINCT FROM %s ON CONFLICT DO NOTHING""",
                         (m["venue"], m["condition_id"] or m["id"], m["rules_hash"], Jsonb(rule_document), m["observed_at"], raw["id"],
                          m["venue"], m["condition_id"] or m["id"], m["rules_hash"]))
+            if retrospective_settings:
+                from .retrospective import register
+                for m in markets:await register(c,m,raw,retrospective_settings)
             if catalog_expire_before is not None:
                 expired = await c.execute("""DELETE FROM surveillance_markets WHERE ctid IN (
                     SELECT m.ctid FROM surveillance_markets m WHERE m.venue=%s AND m.observed_at<%s
@@ -182,7 +185,11 @@ class Store:
                     ON CONFLICT DO NOTHING RETURNING document""", (raw['id'],Jsonb([
                     {**{k:t[k] for k in ('venue','id','market_id','outcome','event_time','received_at')},'document':t} for t in trades])))).fetchall()
                 new=[r['document'] for r in inserted]
-                if new:
+                archived=trades if job['kind']=='retrospective' else new
+                if archived and research_capture:
+                    from .research_archive import capture
+                    await capture(c,archived,raw)
+                if new and not retrospective_settings:
                     from .aggregates import dirty
                     await dirty(c,new)
                     await c.execute(f"""INSERT INTO surveillance_scout
@@ -196,10 +203,13 @@ class Store:
                         GROUP BY 1,2,3 ON CONFLICT(venue,market_id,bucket) DO UPDATE
                         SET fills=surveillance_scout.fills+EXCLUDED.fills,cash=surveillance_scout.cash+EXCLUDED.cash,
                             known_at=now(),last_event=GREATEST(surveillance_scout.last_event,EXCLUDED.last_event)""",(Jsonb(new),))
-            if trades and new:
+            if trades and new and not retrospective_settings:
                 from .longitudinal import ingest_daily
                 await ingest_daily(c,new,raw["id"])
             if completed_walk:
+                if research_capture:
+                    from .research_archive import capture_walk
+                    await capture_walk(c,job,completed_walk)
                 from .aggregates import record_walk
                 if job['kind']!='wide' and completed_walk.get('source_upper'):
                     await record_walk(c,job,dict(completed_walk,upper_time=completed_walk['source_upper']))

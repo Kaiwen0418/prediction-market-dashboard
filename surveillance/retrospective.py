@@ -1,0 +1,223 @@
+"""Settlement-triggered, category-independent, resumable retrospective queue."""
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+
+from psycopg.types.json import Jsonb
+
+from .collectors import ContractError, unpack
+from .normalization import market, trade, digest, now, timestamp
+from .research_archive import read_tape, coverage
+from .leadlag import analyze, VERSION
+
+BASE = 'https://external-api.kalshi.com/trade-api/v2'
+
+
+def final(m):
+    return (m['source_status'] in ('resolved','settled','finalized')
+            and m.get('resolved_outcome') in m['outcomes'] and not m.get('is_combo') and not m.get('is_provisional'))
+
+
+async def register(c, m, raw, settings):
+    """One review per distinct rules/result revision; no category/volume selection."""
+    previous=await (await c.execute('SELECT id,status,document FROM surveillance_retrospectives WHERE venue=%s AND market_id=%s ORDER BY known_at DESC,id DESC LIMIT 1',
+        (m['venue'],m['condition_id'] or m['id']))).fetchone()
+    if not final(m):
+        if previous:
+            await c.execute("UPDATE surveillance_retrospectives SET status='superseded' WHERE venue=%s AND market_id=%s AND status<>'superseded'",(m['venue'],m['condition_id'] or m['id']))
+        return None
+    signature=digest([m['rules_hash'],m['resolved_outcome'],m['source_status']])
+    if previous and previous['status']!='superseded' and previous['document'].get('signature')==signature:
+        return previous['id']
+    try:
+        end=min(datetime.fromisoformat(timestamp(m.get('settled_at') or m['end_time'])),datetime.fromisoformat(raw['received_at']))
+    except (ValueError,TypeError):
+        end=datetime.fromisoformat(raw['received_at'])
+    if end < datetime.now(timezone.utc)-timedelta(days=settings.research_retention_days):
+        return None
+    opened=m.get('opened_at')
+    try:opened=timestamp(opened) if opened else None
+    except (ValueError,TypeError):opened=None
+    start=max(datetime.fromisoformat(timestamp(opened)) if opened else end-timedelta(days=settings.review_lookback_days),
+              end-timedelta(days=settings.review_lookback_days))
+    if start>=end:
+        return None
+    key=digest([m['venue'],m['condition_id'] or m['id'],signature,raw['received_at'],VERSION])
+    document=dict(signature=signature,market=m,raw_id=raw['id'],raw_sha256=raw['sha256'],source=raw['source'],
+        requested_start=start.isoformat(),requested_end=end.isoformat(),
+        scope='bounded_lookback',earlier_history_excluded=not opened or datetime.fromisoformat(timestamp(opened))<start,
+        analysis_mode='retrospective',detector_version=VERSION,
+        reason='final settlement observed; all event categories eligible')
+    inserted=await (await c.execute('''INSERT INTO surveillance_retrospectives(id,venue,market_id,status,document)
+        VALUES(%s,%s,%s,'pending',%s) ON CONFLICT DO NOTHING RETURNING id''',
+        (key,m['venue'],m['condition_id'] or m['id'],Jsonb(document)))).fetchone()
+    if inserted:
+        await c.execute('''UPDATE surveillance_retrospectives SET status='superseded'
+            WHERE venue=%s AND market_id=%s AND id<>%s AND status<>'superseded' ''',
+            (m['venue'],m['condition_id'] or m['id'],key))
+    return key
+
+
+async def discover(worker, job):
+    cp=dict(job['checkpoint']); venue=job['venue']; archive=job['payload'].get('archive',False)
+    params={'limit':100}
+    if venue=='polymarket':
+        url='https://gamma-api.polymarket.com/markets/keyset'
+        params.update(closed='true',order='id',ascending='false')
+        cursor_key='after_cursor'
+        # Full closed walk includes early closures whose scheduled end is future.
+    else:
+        url=BASE+('/historical/markets' if archive else '/markets')
+        params['mve_filter']='exclude'
+        if not archive:params['status']='settled'
+        cursor_key='cursor'
+    if cp.get('cursor') and not job['payload'].get('head'):params[cursor_key]=cp['cursor']
+    raw,body=await worker.collector.get(venue,url,params)
+    rows,cursor=unpack(venue,'catalog',body)
+    if job['payload'].get('head'):cursor=None
+    seen=cp.get('seen',[]); hashed=digest(cursor) if cursor else None
+    if hashed and (cursor==cp.get('cursor') or hashed in seen):raise ContractError('Settlement cursor cycle')
+    normalized=[market(venue,row,raw['received_at']) for row in rows]
+    retained=[]
+    for m in normalized:
+        try:recent=datetime.fromisoformat(timestamp(m.get('settled_at') or m['end_time']))>=datetime.now(timezone.utc)-timedelta(days=worker.settings.research_retention_days)
+        except (ValueError,TypeError):recent=True
+        if recent:retained.append(m)
+    checkpoint=dict(cursor=cursor,pages=cp.get('pages',0)+1,seen=(seen+[hashed])[-1000:] if hashed else [],
+        observed=cp.get('observed',0)+len(rows),outside_retention=cp.get('outside_retention',0)+len(rows)-len(retained),
+        scope='first 100 only; catch-up cursor runs separately' if job['payload'].get('head') else 'all categories; bounded retention; traversal pending' if cursor else 'completed requested catalog walk',
+        completed_at=None if cursor else raw['received_at'])
+    # Same catalog table as live discovery; no competing closed-market catalog.
+    await worker.store.commit_page(job,raw,checkpoint,markets=retained,detailed=True,retrospective_settings=worker.settings)
+    if not cursor:
+        await worker.store.checkpoint(job,dict(checkpoint,cursor=None,seen=[],pages=0,observed=0,outside_retention=0,last_walk=checkpoint))
+    return 300 if cursor or job['payload'].get('head') else 21600
+
+
+async def dispatch(worker, job):
+    from .research_archive import maintain
+    result=await maintain(worker.store,worker.settings)
+    async with worker.store.connection() as c:
+        await worker.store.fence(c,job)
+        count=(await (await c.execute("SELECT count(*) AS n FROM surveillance_jobs WHERE enabled AND kind='retrospective'")).fetchone())['n']
+        rows=[]
+        active=await (await c.execute("SELECT venue,count(*) AS n FROM surveillance_jobs WHERE enabled AND kind='retrospective' GROUP BY venue")).fetchall()
+        counts={r['venue']:r['n'] for r in active}
+        for _ in range(max(0,worker.settings.review_concurrency-count)):
+            chosen=None
+            for venue in sorted(('polymarket','kalshi'),key=lambda v:(counts.get(v,0),v)):
+                chosen=await (await c.execute("SELECT id,venue,market_id FROM surveillance_retrospectives WHERE status='pending' AND venue=%s ORDER BY known_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",(venue,))).fetchone()
+                if chosen:break
+            if not chosen:break
+            r=chosen;rows.append(r);counts[r['venue']]=counts.get(r['venue'],0)+1
+            await c.execute("""INSERT INTO surveillance_jobs(id,kind,venue,payload)
+                VALUES(%s,'retrospective',%s,%s) ON CONFLICT(id) DO UPDATE SET enabled=true,due_at=now(),checkpoint='{}'""",
+                ('retrospective:'+r['id'],r['venue'],Jsonb(dict(review_id=r['id'],market_id=r['market_id']))))
+            await c.execute("UPDATE surveillance_retrospectives SET status='collecting' WHERE id=%s",(r['id'],))
+    await worker.store.checkpoint(job,dict(result,admitted=len(rows)))
+    return 30
+
+
+async def finish(worker,job,cp,status):
+    async with worker.store.connection() as c:
+        await worker.store.fence(c,job)
+        await c.execute("UPDATE surveillance_retrospectives SET status=%s,document=document||%s WHERE id=%s AND status<>'superseded'",
+            (status,Jsonb(dict(completion=cp)),job['payload']['review_id']))
+        await c.execute("UPDATE surveillance_jobs SET checkpoint=%s,enabled=false,updated_at=now() WHERE id=%s",(Jsonb(cp),job['id']))
+    return 3600
+
+
+async def collect_page(worker,job,review,cp):
+    venue=job['venue']; doc=review['document']; start=doc['requested_start']; end=doc['requested_end']
+    phases=['current','historical'] if venue=='kalshi' else ['current']
+    phase=cp.get('phase',0)
+    if phase>=len(phases) or cp.get('pages',0)>=worker.settings.review_max_pages:
+        cp.update(stage='analyze',backfill_status='walks_completed' if phase>=len(phases) else 'page_budget_exhausted',next_end=end)
+        async with worker.store.connection() as c:
+            await worker.store.fence(c,job)
+            if phase>=len(phases):
+                from .research_archive import capture_walk
+                source_ids=cp.get('source_ids',[])
+                remaining=(await (await c.execute('SELECT count(*) AS n FROM surveillance_raw WHERE id=ANY(%s)',(source_ids,))).fetchone())['n']
+                await capture_walk(c,job,dict(lower_time=start,source_upper=end,raw_ids=source_ids,
+                    refs_complete=remaining==len(source_ids) and len(source_ids)<=64))
+            await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
+        return 15
+    params={'limit':1000}
+    if venue=='polymarket':
+        url='https://data-api.polymarket.com/v2/trades'
+        params.update(condition=job['payload']['market_id'],taker_only='true')
+    else:
+        url=BASE+('/markets/trades' if phases[phase]=='current' else '/historical/trades')
+        params.update(ticker=job['payload']['market_id'],min_ts=int(datetime.fromisoformat(start).timestamp())-1,
+                      max_ts=int(datetime.fromisoformat(end).timestamp())+1)
+    if cp.get('cursor'):params['cursor']=cp['cursor']
+    raw,body=await worker.collector.get(venue,url,params)
+    rows,cursor=unpack(venue,'trades',body)
+    hashed=digest(cursor) if cursor else None
+    if hashed and (hashed in cp.get('seen',[]) or cursor==cp.get('cursor')):raise ContractError('Review trade cursor cycle')
+    counts=Counter(cp.get('counts',{})); previous=cp.get('last_time'); accepted=[]; crossed=False
+    for row in rows:
+        t=trade(venue,row,raw['received_at']); ts=t['event_time']
+        if t['market_id']!=job['payload']['market_id']:raise ContractError('Review trade belongs to another market')
+        if previous and ts>previous:raise ContractError('Review feed not newest first')
+        if ts<start:crossed=True;break
+        if ts!=previous:counts.clear()
+        previous=ts;counts[t['identity']]+=1
+        t['id']=t['identity']+(f":{counts[t['identity']]}" if venue=='polymarket' else '')
+        if ts<end:
+            t.update(raw_id=raw['id'],collection_scope='retrospective');accepted.append(t)
+    cp.update(cursor=cursor,counts=dict(counts),last_time=previous,pages=cp.get('pages',0)+1,
+        seen=(cp.get('seen',[])+[hashed])[-1000:] if hashed else [],
+        source_ids=cp.get('source_ids',[])+[raw['id']],fills=cp.get('fills',0)+len(accepted))
+    if crossed or not cursor:
+        cp.update(phase=phase+1,cursor=None,counts={},last_time=None,seen=[])
+    await worker.store.commit_page(job,raw,cp,trades=accepted,retrospective_settings=worker.settings)
+    return 15
+
+
+async def run(worker,job):
+    rows=await worker.store.fetch('SELECT * FROM surveillance_retrospectives WHERE id=%s',(job['payload']['review_id'],))
+    cp=dict(job['checkpoint'])
+    if not rows or rows[0]['status']=='superseded':return await finish(worker,job,cp,'expired')
+    review=rows[0]; doc=review['document']; start=doc['requested_start']; end=doc['requested_end']
+    if not cp:
+        cov=await coverage(worker.store,job['venue'],job['payload']['market_id'],start,end)
+        cp=dict(stage='analyze' if cov['sampled_fraction']==1 else 'collect',initial_coverage=cov,next_end=end)
+        await worker.store.checkpoint(job,cp)
+    if cp['stage']=='collect':return await collect_page(worker,job,review,cp)
+    hi=datetime.fromisoformat(cp['next_end']); beginning=datetime.fromisoformat(start)
+    if hi<=beginning:
+        cp['completed_at']=now()
+        return await finish(worker,job,cp,'complete_with_gaps' if cp.get('incomplete_slices') else 'complete_observed')
+    hours=cp.get('slice_hours',24); lo=max(beginning,hi-timedelta(hours=hours))
+    # Four-hour overlap supports a 2h trend, 30m baseline and 1h precursor.
+    context=max(beginning,lo-timedelta(hours=4))
+    data_end=min(datetime.fromisoformat(end),hi+timedelta(hours=1))
+    archive_cutoff=now()
+    try:
+        trades,refs=await read_tape(worker.store,job['venue'],job['payload']['market_id'],context.isoformat(),data_end.isoformat(),worker.settings.replay_max_trades,known_at=archive_cutoff)
+    except ValueError as exc:
+        if hours>1:
+            cp['slice_hours']=max(1,hours/2);await worker.store.checkpoint(job,cp);return 15
+        trades=[];refs=[];unavailable=str(exc)
+    else:unavailable=None
+    report=analyze(trades,lo.isoformat(),hi.isoformat(),observation_end=data_end.isoformat()) if trades else dict(episodes=[],summary_bins=[],input_fills=0)
+    cov=await coverage(worker.store,job['venue'],job['payload']['market_id'],context.isoformat(),hi.isoformat())
+    # Completed HTTP traversal is not proof that every historical trade still
+    # exists upstream or locally. Preserve its distinct provenance and gaps.
+    report.update(analysis_mode='retrospective',version=VERSION,start=lo.isoformat(),end=hi.isoformat(),
+        archive_cutoff=archive_cutoff,context_start=context.isoformat(),data_end=data_end.isoformat(),coverage=cov,backfill_status=cp.get('backfill_status','not_needed'),
+        input_status='budget_exceeded' if unavailable else 'observed_inputs' if trades else 'no_observed_inputs',
+        unavailable_reason=unavailable,raw_references=refs,normalized_replay_available=bool(trades),
+        full_history_claim=False,settlement_version=review['id'])
+    key=digest([review['id'],lo.isoformat(),hi.isoformat(),VERSION])
+    cp.update(next_end=lo.isoformat(),slice_hours=24,slices=cp.get('slices',0)+1,
+        episodes=cp.get('episodes',0)+len(report['episodes']),
+        incomplete_slices=cp.get('incomplete_slices',0)+int(bool(unavailable) or not trades or cov['sampled_fraction']!=1))
+    async with worker.store.connection() as c:
+        await worker.store.fence(c,job)
+        await c.execute('''INSERT INTO surveillance_review_slices(id,review_id,lower_time,upper_time,document)
+            VALUES(%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''',(key,review['id'],lo,hi,Jsonb(report)))
+        await c.execute("UPDATE surveillance_retrospectives SET status='analyzing' WHERE id=%s",(review['id'],))
+        await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
+    return 15

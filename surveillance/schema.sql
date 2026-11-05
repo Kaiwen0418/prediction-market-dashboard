@@ -209,3 +209,55 @@ CREATE OR REPLACE VIEW surveillance_wallet_daily AS
  sum(buy_cash) AS buy_cash,sum(sell_cash) AS sell_cash,sum(buy_shares) AS buy_shares,sum(sell_shares) AS sell_shares,
  max(max_fill_cash) AS max_fill_cash,array_agg(DISTINCT raw_id) AS raw_ids,true AS refs_complete
  FROM surveillance_wallet_daily_parts GROUP BY wallet,market_id,outcome,day;
+
+-- Retrospective archive is independent of hot receipt FIFO. It retains normalized
+-- inputs, NOT the original HTTP response. Raw availability is checked on read.
+CREATE TABLE IF NOT EXISTS surveillance_research_tape (
+ id text PRIMARY KEY, venue text NOT NULL, market_id text NOT NULL,
+ lower_time timestamptz NOT NULL, upper_time timestamptz NOT NULL,
+ known_at timestamptz NOT NULL, raw_id text NOT NULL, fills integer NOT NULL,
+ document jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS surveillance_research_tape_window ON surveillance_research_tape(venue,market_id,lower_time);
+CREATE INDEX IF NOT EXISTS surveillance_research_tape_age ON surveillance_research_tape(known_at,id);
+CREATE TABLE IF NOT EXISTS surveillance_research_walks (
+ id text PRIMARY KEY, venue text NOT NULL, market_id text,
+ lower_time timestamptz NOT NULL, upper_time timestamptz NOT NULL,
+ known_at timestamptz NOT NULL, document jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS surveillance_research_walk_window ON surveillance_research_walks(venue,market_id,upper_time);
+CREATE INDEX IF NOT EXISTS surveillance_research_walk_age ON surveillance_research_walks(known_at,id);
+CREATE TABLE IF NOT EXISTS surveillance_retrospectives (
+ id text PRIMARY KEY, venue text NOT NULL, market_id text NOT NULL,
+ known_at timestamptz NOT NULL DEFAULT now(), status text NOT NULL,
+ document jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS surveillance_retrospective_pending ON surveillance_retrospectives(venue,known_at,id) WHERE status='pending';
+CREATE INDEX IF NOT EXISTS surveillance_retrospective_age ON surveillance_retrospectives(known_at,id);
+CREATE INDEX IF NOT EXISTS surveillance_retrospective_market ON surveillance_retrospectives(venue,market_id,known_at DESC);
+CREATE TABLE IF NOT EXISTS surveillance_review_slices (
+ id text PRIMARY KEY, review_id text NOT NULL REFERENCES surveillance_retrospectives(id) ON DELETE CASCADE,
+ lower_time timestamptz NOT NULL, upper_time timestamptz NOT NULL,
+ known_at timestamptz NOT NULL DEFAULT now(), document jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS surveillance_review_slices_parent ON surveillance_review_slices(review_id,lower_time,id);
+INSERT INTO surveillance_schema VALUES(7) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS surveillance_research_budget (
+ name text PRIMARY KEY, logical_bytes bigint NOT NULL DEFAULT 0
+);
+CREATE OR REPLACE FUNCTION surveillance_research_account() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE delta bigint;
+BEGIN
+ delta := CASE WHEN TG_OP='DELETE' THEN 0 ELSE pg_column_size(NEW)+256 END
+        - CASE WHEN TG_OP='INSERT' THEN 0 ELSE pg_column_size(OLD)+256 END;
+ INSERT INTO surveillance_research_budget VALUES(TG_TABLE_NAME,delta)
+ ON CONFLICT(name) DO UPDATE SET logical_bytes=surveillance_research_budget.logical_bytes+delta;
+ RETURN NULL;
+END $$;
+DO $$ DECLARE tab text; BEGIN
+ FOREACH tab IN ARRAY ARRAY['surveillance_research_tape','surveillance_research_walks','surveillance_retrospectives','surveillance_review_slices'] LOOP
+ IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname=tab||'_account' AND tgrelid=tab::regclass) THEN
+ EXECUTE format('CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION surveillance_research_account()',tab||'_account',tab);
+ END IF;
+ END LOOP;
+END $$;
