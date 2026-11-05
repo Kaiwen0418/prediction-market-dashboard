@@ -257,3 +257,20 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(await self.store.fetch('SELECT * FROM surveillance_review_pages')),4)
             self.assertGreater(len(await self.store.fetch('SELECT id FROM surveillance_research_tape')),0)
         finally:await worker.collector.close()
+
+    async def test_empty_verified_reports_release_admission_slots(self):
+        async with self.store.connection() as c:
+            await c.execute('''INSERT INTO surveillance_retrospectives(id,venue,market_id,status,document)
+                SELECT 'empty'||i,'polymarket','c'||i,'complete_observed',
+                '{"continuity_required":true,"continuity":{"fills_per_walk":0},"market":{"volume":"0"}}'
+                FROM generate_series(1,20) i''')
+            await c.execute('''INSERT INTO surveillance_retrospectives(id,venue,market_id,status,document)
+                VALUES('positive','kalshi','k','pending','{"market":{"volume":"100"}}')''')
+        await self.store.enqueue('dispatch','retrospective_dispatch','system',{})
+        worker=Worker(replace(self.settings,mode="retrospective"))
+        await worker.seed()
+        job=await self.store.claim()
+        try:await dispatch(worker,job)
+        finally:await worker.collector.close()
+        self.assertEqual((await self.store.fetch("SELECT count(*) AS n FROM surveillance_retrospectives WHERE status='no_observed_trades'"))[0]['n'],20)
+        self.assertEqual((await self.store.fetch("SELECT status FROM surveillance_retrospectives WHERE id='positive'"))[0]['status'],'collecting')

@@ -31,7 +31,10 @@ async def register(c, m, raw, settings):
             await c.execute("UPDATE surveillance_retrospectives SET status='superseded' WHERE venue=%s AND market_id=%s AND status NOT IN ('superseded','excluded')",(m['venue'],m['condition_id'] or m['id']))
         return None
     signature=digest([m['rules_hash'],m['resolved_outcome'],m['source_status']])
-    if previous and previous['status'] not in ('superseded','excluded') and previous['document'].get('signature')==signature:
+    if previous and previous['status']=='no_observed_trades' and previous['document'].get('signature')==signature:
+        if float(m.get('volume') or 0)<=float(previous['document']['market'].get('volume') or 0):
+            return previous['id']
+    if previous and previous['status'] not in ('superseded','excluded','no_observed_trades') and previous['document'].get('signature')==signature:
         return previous['id']
     try:
         end=min(datetime.fromisoformat(timestamp(m.get('settled_at') or m['end_time'])),datetime.fromisoformat(raw['received_at']))
@@ -103,6 +106,10 @@ async def discover(worker, job):
 async def dispatch(worker, job):
     from .research_archive import maintain
     result=await maintain(worker.store,worker.settings)
+    measured=worker.capacity.result
+    if 'database_bytes' not in measured:
+        from .capacity import usage
+        measured=await usage(worker.store,worker.settings)
     async with worker.store.connection() as c:
         await worker.store.fence(c,job)
         from .review_policy import sweep
@@ -111,11 +118,12 @@ async def dispatch(worker, job):
         rows=[]
         active=await (await c.execute("SELECT venue,count(*) AS n FROM surveillance_jobs WHERE enabled AND kind='retrospective' GROUP BY venue")).fetchall()
         counts={r['venue']:r['n'] for r in active}
-        admitted=(await (await c.execute("SELECT count(*) AS n FROM surveillance_retrospectives WHERE document->>'continuity_required'='true' AND status NOT IN ('excluded','superseded')")).fetchone())['n']
-        for _ in range(min(max(0,worker.settings.review_concurrency-count),max(0,20-admitted))):
+        from .admission import slots
+        result['admission']=slots(worker.settings,measured,result['logical_budget_bytes']['tape'],count)
+        for _ in range(result['admission']['slots']):
             chosen=None
             for venue in sorted(('polymarket','kalshi'),key=lambda v:(counts.get(v,0),v)):
-                chosen=await (await c.execute("SELECT id,venue,market_id FROM surveillance_retrospectives WHERE status='pending' AND venue=%s AND NOT (COALESCE((document->'market'->>'volume_reported')::boolean,false) AND (document->'market'->>'volume')::numeric=0) ORDER BY known_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",(venue,))).fetchone()
+                chosen=await (await c.execute("SELECT id,venue,market_id FROM surveillance_retrospectives WHERE status='pending' AND venue=%s AND NOT (COALESCE((document->'market'->>'volume_reported')::boolean,false) AND (document->'market'->>'volume')::numeric=0) ORDER BY CASE WHEN (document->'market'->>'volume')::numeric>0 THEN 0 ELSE 1 END,known_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",(venue,))).fetchone()
                 if chosen:break
             if not chosen:break
             r=chosen;rows.append(r);counts[r['venue']]=counts.get(r['venue'],0)+1
@@ -167,6 +175,8 @@ async def collect_page(worker,job,review,cp):
                 (Jsonb(dict(continuity=dict(version=1,status='verified_api_interval',start=start,end=end,
                     fills_per_walk=cp.get('fills',0),verified_at=now(),scope='Two complete matching API traversals; upstream omissions remain unobservable'))),review['id']))
             await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
+        if cp.get('fills',0)==0:
+            return await finish(worker,job,cp,'no_observed_trades')
         return 15
     params={'limit':1000}
     if venue=='polymarket':
