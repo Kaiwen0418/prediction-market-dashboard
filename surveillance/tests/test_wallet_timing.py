@@ -63,3 +63,27 @@ class TimingStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.store.fetch('SELECT * FROM surveillance_wallet_timing'),[])
         rows=await self.store.fetch("SELECT logical_bytes FROM surveillance_research_budget WHERE name='surveillance_wallet_timing'")
         self.assertEqual(rows[0]['logical_bytes'],0)
+
+
+class HorizonTests(unittest.TestCase):
+    def test_short_market_has_short_horizon_observations(self):
+        rows,start,end=tape()
+        from surveillance.leadlag import epoch,iso
+        short_end=iso(epoch(start)+1800)
+        short_rows=[r for r in rows if epoch(r['event_time'])<epoch(short_end)]
+        long=measure(short_rows,start,short_end,3600)
+        short=measure(short_rows,start,short_end,300)
+        self.assertEqual(sum(r['observed'] for r in long),0)
+        self.assertGreater(sum(r['observed'] for r in short),0)
+
+
+class LegacyHorizonTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_hour_metric_is_unknown_at_short_horizon(self):
+        from surveillance.wallet_timing import patterns
+        class Store:
+            async def fetch(self,*args):
+                return [dict(events=['event'],review_id='r',slice_id='s',document=dict(
+                    eligible=1,observed=1,controlled=1,price_change_sum=.1,excess_sum=.1))]
+        result=await patterns(Store(),'wallet',300)
+        self.assertEqual(result['events'][0]['observed'],0)
+        self.assertIsNone(result['events'][0]['mean_price_change'])
