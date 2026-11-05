@@ -34,3 +34,29 @@ class PolicyStorageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['excluded'],1)
         self.assertEqual((await self.store.fetch('SELECT status FROM surveillance_retrospectives'))[0]['status'],'excluded')
         self.assertFalse((await self.store.fetch('SELECT enabled FROM surveillance_jobs'))[0]['enabled'])
+
+
+class ActivityTests(unittest.TestCase):
+    def test_only_explicit_zero_is_excluded(self):
+        for market in ({'volume':'0'}, {'volume':'0','volume_reported':False}, {'volume':'0.01','volume_reported':True}):
+            self.assertTrue(evaluate(market)['eligible'])
+        self.assertEqual(evaluate({'volume':'0','volume_reported':True})['reason'],'reported_zero_activity')
+
+
+@unittest.skipUnless(os.getenv('SURVEILLANCE_TEST_DATABASE_URL'),'Postgres required')
+class ReactivationTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp=pg.PostgresTests.asyncSetUp
+    asyncTearDown=pg.PostgresTests.asyncTearDown
+
+    async def test_activity_can_reactivate_excluded_review(self):
+        from surveillance.tests.test_retrospective import RetrospectiveTests
+        from surveillance.retrospective import register
+        from datetime import datetime,timedelta,timezone
+        m,raw,_=await RetrospectiveTests.final_market(self)
+        async with self.store.connection() as c:
+            first=await register(c,dict(m,volume='1',volume_reported=True),raw,self.settings)
+            self.assertIsNone(await register(c,dict(m,volume='0',volume_reported=True),raw,self.settings))
+            later=dict(raw,received_at=(datetime.now(timezone.utc)+timedelta(seconds=1)).isoformat())
+            again=await register(c,dict(m,volume='2',volume_reported=True),later,self.settings)
+            self.assertNotEqual(first,again)
+        self.assertEqual((await self.store.fetch('SELECT status FROM surveillance_retrospectives WHERE id=%s',(again,)))[0]['status'],'pending')
