@@ -1,7 +1,7 @@
 """Transparent investigation budget exclusions; discovery still records markets."""
 import re
 
-VERSION = 'review-scope-v1'
+VERSION = 'review-scope-v2'
 ASSETS = re.compile(r'\b(bitcoin|btc|ethereum|eth|solana|sol|dogecoin|xrp|crypto|stock|share price|forex|exchange rate|s&p|nasdaq|dow jones|spx|tesla|tsla|nvidia|nvda|aapl|apple|gold|silver|crude oil|brent|eur/usd|usd/jpy)\b',re.I)
 PRICE = re.compile(r'\b(above|below|between|over|under|reach|hit|close|closing|price|up or down|up/down|higher|lower|rise|fall|increase|decrease)\b',re.I)
 PRICE_SERIES = re.compile(r'^KX(BTC|ETH|SOL|XRP|DOGE|INX|NASDAQ|SPX|FOREX|GOLD|SILVER|WTI|BRENT)(?:[A-Z0-9]*-)',re.I)
@@ -9,6 +9,10 @@ FINANCIAL_CATEGORIES = {'crypto','cryptocurrency','stocks','equities','forex','i
 
 
 def evaluate(market):
+    from decimal import Decimal
+    known_zero = market.get('volume_reported') is True and Decimal(str(market.get('volume') or '0')) == 0
+    if known_zero:
+        return dict(version=VERSION,eligible=False,reason='reported_zero_activity',basis='explicit_source_volume')
     title = market.get('title') or ''
     category = str(market.get('category') or '').lower()
     financial = bool(ASSETS.search(title)) or category in FINANCIAL_CATEGORIES

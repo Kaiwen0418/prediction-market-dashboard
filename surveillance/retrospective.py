@@ -31,7 +31,7 @@ async def register(c, m, raw, settings):
             await c.execute("UPDATE surveillance_retrospectives SET status='superseded' WHERE venue=%s AND market_id=%s AND status NOT IN ('superseded','excluded')",(m['venue'],m['condition_id'] or m['id']))
         return None
     signature=digest([m['rules_hash'],m['resolved_outcome'],m['source_status']])
-    if previous and previous['status']!='superseded' and previous['document'].get('signature')==signature:
+    if previous and previous['status'] not in ('superseded','excluded') and previous['document'].get('signature')==signature:
         return previous['id']
     try:
         end=min(datetime.fromisoformat(timestamp(m.get('settled_at') or m['end_time'])),datetime.fromisoformat(raw['received_at']))
@@ -115,7 +115,7 @@ async def dispatch(worker, job):
         for _ in range(min(max(0,worker.settings.review_concurrency-count),max(0,20-admitted))):
             chosen=None
             for venue in sorted(('polymarket','kalshi'),key=lambda v:(counts.get(v,0),v)):
-                chosen=await (await c.execute("SELECT id,venue,market_id FROM surveillance_retrospectives WHERE status='pending' AND venue=%s ORDER BY known_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",(venue,))).fetchone()
+                chosen=await (await c.execute("SELECT id,venue,market_id FROM surveillance_retrospectives WHERE status='pending' AND venue=%s AND NOT (COALESCE((document->'market'->>'volume_reported')::boolean,false) AND (document->'market'->>'volume')::numeric=0) ORDER BY known_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",(venue,))).fetchone()
                 if chosen:break
             if not chosen:break
             r=chosen;rows.append(r);counts[r['venue']]=counts.get(r['venue'],0)+1
