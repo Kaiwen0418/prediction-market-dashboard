@@ -23,3 +23,9 @@
 累计20个档案的限制已移除。每轮使用容量检查缓存和归档记账，按可用字节决定是否继续准入，同时保留最多两个在途任务。为每个在途任务预留数据库512 MiB、原始文件256 MiB和紧凑归档256 MiB，准入水位分别为数据库活跃空间70%/物理空间90%、原始文件70%、归档75%。这些是保守工作余量，实际采集仍由容量守卫约束。空间回收或扩容后自动恢复接纳，正在保护的证据维持保留规则。
 
 双遍历没有观察到成交的档案标记 no_observed_trades 并保留证据。后续目录成交量增加时可以重新入队。非零成交量优先于未知成交量。
+
+## Collection throughput
+
+The default rotating work queue now admits up to 32 markets, with storage headroom reducing that number when necessary. The single worker processes one bounded page or analysis step per job and requeues it after one second. Admission runs every five seconds. Requests still share the existing 0.6-second minimum interval and provider retry/backoff handling. Verification traversals retain the 60-second separation and full-interval comparison.
+
+This increases the number of markets making progress while other jobs wait. It does not introduce simultaneous analysis tasks or multiply the rate limit across workers. Actual throughput depends on page counts, network latency and source availability. Storage protections remain active throughout the larger queue.
