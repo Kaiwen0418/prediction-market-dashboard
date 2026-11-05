@@ -8,6 +8,7 @@ from .collectors import ContractError, unpack
 from .normalization import market, trade, digest, now, timestamp
 from .research_archive import read_tape, coverage
 from .leadlag import analyze, VERSION
+from .review_policy import evaluate, exclude
 
 BASE = 'https://external-api.kalshi.com/trade-api/v2'
 
@@ -21,9 +22,13 @@ async def register(c, m, raw, settings):
     """One review per distinct rules/result revision; no category/volume selection."""
     previous=await (await c.execute('SELECT id,status,document FROM surveillance_retrospectives WHERE venue=%s AND market_id=%s ORDER BY known_at DESC,id DESC LIMIT 1',
         (m['venue'],m['condition_id'] or m['id']))).fetchone()
+    policy=evaluate(m)
+    if not policy['eligible']:
+        if previous:await exclude(c,previous['id'],policy)
+        return None
     if not final(m):
         if previous:
-            await c.execute("UPDATE surveillance_retrospectives SET status='superseded' WHERE venue=%s AND market_id=%s AND status<>'superseded'",(m['venue'],m['condition_id'] or m['id']))
+            await c.execute("UPDATE surveillance_retrospectives SET status='superseded' WHERE venue=%s AND market_id=%s AND status NOT IN ('superseded','excluded')",(m['venue'],m['condition_id'] or m['id']))
         return None
     signature=digest([m['rules_hash'],m['resolved_outcome'],m['source_status']])
     if previous and previous['status']!='superseded' and previous['document'].get('signature')==signature:
@@ -42,7 +47,7 @@ async def register(c, m, raw, settings):
     if start>=end:
         return None
     key=digest([m['venue'],m['condition_id'] or m['id'],signature,raw['received_at'],VERSION])
-    document=dict(signature=signature,market=m,raw_id=raw['id'],raw_sha256=raw['sha256'],source=raw['source'],
+    document=dict(review_policy=policy,signature=signature,market=m,raw_id=raw['id'],raw_sha256=raw['sha256'],source=raw['source'],
         requested_start=start.isoformat(),requested_end=end.isoformat(),
         scope='bounded_lookback',earlier_history_excluded=not opened or datetime.fromisoformat(timestamp(opened))<start,
         analysis_mode='retrospective',detector_version=VERSION,
@@ -52,7 +57,7 @@ async def register(c, m, raw, settings):
         (key,m['venue'],m['condition_id'] or m['id'],Jsonb(document)))).fetchone()
     if inserted:
         await c.execute('''UPDATE surveillance_retrospectives SET status='superseded'
-            WHERE venue=%s AND market_id=%s AND id<>%s AND status<>'superseded' ''',
+            WHERE venue=%s AND market_id=%s AND id<>%s AND status NOT IN ('superseded','excluded') ''',
             (m['venue'],m['condition_id'] or m['id'],key))
     return key
 
@@ -81,7 +86,9 @@ async def discover(worker, job):
     for m in normalized:
         try:recent=datetime.fromisoformat(timestamp(m.get('settled_at') or m['end_time']))>=datetime.now(timezone.utc)-timedelta(days=worker.settings.research_retention_days)
         except (ValueError,TypeError):recent=True
-        if recent:retained.append(m)
+        if recent:
+            m['review_policy']=evaluate(m)
+            retained.append(m)
     checkpoint=dict(cursor=cursor,pages=cp.get('pages',0)+1,seen=(seen+[hashed])[-1000:] if hashed else [],
         observed=cp.get('observed',0)+len(rows),outside_retention=cp.get('outside_retention',0)+len(rows)-len(retained),
         scope='first 100 only; catch-up cursor runs separately' if job['payload'].get('head') else 'all categories; bounded retention; traversal pending' if cursor else 'completed requested catalog walk',
@@ -98,6 +105,8 @@ async def dispatch(worker, job):
     result=await maintain(worker.store,worker.settings)
     async with worker.store.connection() as c:
         await worker.store.fence(c,job)
+        from .review_policy import sweep
+        result['review_policy']=await sweep(c)
         count=(await (await c.execute("SELECT count(*) AS n FROM surveillance_jobs WHERE enabled AND kind='retrospective'")).fetchone())['n']
         rows=[]
         active=await (await c.execute("SELECT venue,count(*) AS n FROM surveillance_jobs WHERE enabled AND kind='retrospective' GROUP BY venue")).fetchall()
@@ -120,7 +129,7 @@ async def dispatch(worker, job):
 async def finish(worker,job,cp,status):
     async with worker.store.connection() as c:
         await worker.store.fence(c,job)
-        await c.execute("UPDATE surveillance_retrospectives SET status=%s,document=document||%s WHERE id=%s AND status<>'superseded'",
+        await c.execute("UPDATE surveillance_retrospectives SET status=%s,document=document||%s WHERE id=%s AND status NOT IN ('superseded','excluded')",
             (status,Jsonb(dict(completion=cp)),job['payload']['review_id']))
         await c.execute("UPDATE surveillance_jobs SET checkpoint=%s,enabled=false,updated_at=now() WHERE id=%s",(Jsonb(cp),job['id']))
     return 3600
@@ -178,7 +187,7 @@ async def collect_page(worker,job,review,cp):
 async def run(worker,job):
     rows=await worker.store.fetch('SELECT * FROM surveillance_retrospectives WHERE id=%s',(job['payload']['review_id'],))
     cp=dict(job['checkpoint'])
-    if not rows or rows[0]['status']=='superseded':return await finish(worker,job,cp,'expired')
+    if not rows or rows[0]['status'] in ('superseded','excluded'):return await finish(worker,job,cp,'expired')
     review=rows[0]; doc=review['document']; start=doc['requested_start']; end=doc['requested_end']
     if not cp:
         cov=await coverage(worker.store,job['venue'],job['payload']['market_id'],start,end)
