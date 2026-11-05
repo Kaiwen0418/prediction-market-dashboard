@@ -132,7 +132,7 @@ async def dispatch(worker, job):
                 ('retrospective:'+r['id'],r['venue'],Jsonb(dict(review_id=r['id'],market_id=r['market_id']))))
             await c.execute("UPDATE surveillance_retrospectives SET status='collecting',document=document||jsonb_build_object('continuity_required',true) WHERE id=%s",(r['id'],))
     await worker.store.checkpoint(job,dict(result,admitted=len(rows)))
-    return 30
+    return 5
 
 
 async def finish(worker,job,cp,status):
@@ -177,7 +177,7 @@ async def collect_page(worker,job,review,cp):
             await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
         if cp.get('fills',0)==0:
             return await finish(worker,job,cp,'no_observed_trades')
-        return 15
+        return 1
     params={'limit':1000}
     if venue=='polymarket':
         url='https://data-api.polymarket.com/v2/trades'
@@ -210,7 +210,7 @@ async def collect_page(worker,job,review,cp):
     if crossed or not cursor:
         cp.update(phase=phase+1,cursor=None,counts={},last_time=None,seen=[])
     await worker.store.commit_page(job,raw,cp,trades=accepted,retrospective_settings=worker.settings)
-    return 15
+    return 1
 
 
 async def run(worker,job):
@@ -236,7 +236,7 @@ async def run(worker,job):
         trades,refs=await read_tape(worker.store,job['venue'],job['payload']['market_id'],context.isoformat(),data_end.isoformat(),worker.settings.replay_max_trades,known_at=archive_cutoff)
     except ValueError as exc:
         if hours>1:
-            cp['slice_hours']=max(1,hours/2);await worker.store.checkpoint(job,cp);return 15
+            cp['slice_hours']=max(1,hours/2);await worker.store.checkpoint(job,cp);return 1
         return await finish(worker,job,dict(cp,capacity_reason=str(exc)),'needs_analysis_capacity')
     else:unavailable=None
     report=analyze(trades,lo.isoformat(),hi.isoformat(),observation_end=data_end.isoformat()) if trades else dict(episodes=[],summary_bins=[],input_fills=0)
@@ -260,4 +260,4 @@ async def run(worker,job):
         await persist(c,key,trades,lo.isoformat(),hi.isoformat())
         await c.execute("UPDATE surveillance_retrospectives SET status='analyzing' WHERE id=%s",(review['id'],))
         await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
-    return 15
+    return 1
