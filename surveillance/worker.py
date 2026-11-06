@@ -14,6 +14,7 @@ from .maintenance import prune
 from .capacity import CapacityGuard
 from .normalization import market, trade, digest
 from .storage import Store, RawArchive
+from psycopg.errors import LockNotAvailable
 from psycopg.types.json import Jsonb
 
 logger = logging.getLogger(__name__)
@@ -430,6 +431,10 @@ class Worker:
                         await self.store.fence(c, job)
                         await c.execute("UPDATE surveillance_jobs SET enabled=false WHERE id=%s", (job["id"],))
             await self.store.release(job, delay)
+        except LockNotAvailable:
+            # The failed transaction rolled back. Resume from its durable checkpoint.
+            await self.store.release(job, 2)
+            return False
         except asyncio.CancelledError:
             await self.store.release(job, 0, "worker interrupted; resume checkpoint")
             raise
@@ -461,7 +466,13 @@ class Worker:
             if once:
                 return await self.run_once()
             while True:
-                if not await self.run_once():
+                try:
+                    progressed = await self.run_once()
+                except LockNotAvailable:
+                    # Maintenance can hold the exclusive lock across several claims.
+                    await asyncio.sleep(2)
+                    continue
+                if not progressed:
                     await asyncio.sleep(1)
         finally:
             loop.remove_signal_handler(signal.SIGTERM)

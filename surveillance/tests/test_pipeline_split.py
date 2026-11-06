@@ -40,3 +40,21 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await worker.run_once())
             self.assertEqual((await self.store.claim())['id'],'collect')
         finally:await worker.collector.close()
+
+
+class WorkerLockRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_polls_again_after_claim_lock_timeout(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from psycopg.errors import LockNotAvailable
+
+        worker = object.__new__(Worker)
+        worker.seed = AsyncMock()
+        worker.collector = AsyncMock()
+        worker.run_once = AsyncMock(side_effect=[LockNotAvailable(), asyncio.CancelledError()])
+        with patch('surveillance.worker.asyncio.sleep', new_callable=AsyncMock) as sleep:
+            with self.assertRaises(asyncio.CancelledError):
+                await worker.run()
+        sleep.assert_awaited_once_with(2)
+        self.assertEqual(worker.run_once.await_count, 2)
+        worker.collector.close.assert_awaited_once()
