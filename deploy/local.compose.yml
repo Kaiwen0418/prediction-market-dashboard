@@ -83,6 +83,18 @@ services:
         condition: service_healthy
     mem_limit: 1g
     cpus: 2
+  surveillance-analysis:
+    <<: *python
+    command: [python, -m, surveillance.cli, worker]
+    environment:
+      <<: *surveillance-env
+      SURVEILLANCE_WORKER_ROLE: analysis
+    volumes: ['evidence:/data']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+    cpus: 1
 volumes:
   database:
   evidence:

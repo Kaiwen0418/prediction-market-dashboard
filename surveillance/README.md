@@ -11,6 +11,10 @@ The default `SURVEILLANCE_MODE=retrospective` stops automatic deep selection,
 online anomaly/scout detection, online wallet-pattern jobs and online aggregates.
 The shared market catalog now receives closed/settled discoveries. Global REST collection and hot-data bootstrap are disabled in this mode. Selected markets receive complete fixed-window API walks and an independent verification walk.
 There is no 100-contract eligibility gate for retrospective reviews.
+Collection and analysis use separate durable jobs and worker processes. The collector
+releases its market slot as soon as verification finishes. Run the analysis worker
+with `SURVEILLANCE_WORKER_ROLE=analysis python -m surveillance.cli worker`; Docker
+Compose starts it as `surveillance-analysis`. Its resource limit is one CPU / 512 MiB.
 
 Compact normalized tape survives hot raw-response FIFO, within separate 10 GiB
 archive / 512 MiB summary admission budgets and 90-day retention. These are inside

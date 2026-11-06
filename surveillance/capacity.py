@@ -246,13 +246,18 @@ async def enforce(store,settings,batch_limit=500,max_batches=1):
 
 
 class CapacityGuard:
-    def __init__(self,store,settings):
+    def __init__(self,store,settings,read_only=False):
         self.store,self.settings=store,settings
+        self.read_only=read_only
         self.checked_at=float('-inf');self.result={'blocked':False}
 
     async def check(self):
         interval=1 if self.result.get('index_pending') else 300 if self.result.get('error') else 60
         if time.monotonic()-self.checked_at>=interval:
-            self.result=await enforce(self.store,self.settings)
+            if self.read_only:
+                measured=await usage(self.store,self.settings)
+                self.result=dict(measured,blocked=pressured(measured,self.settings))
+            else:
+                self.result=await enforce(self.store,self.settings)
             self.checked_at=time.monotonic()
         return not self.result['blocked']
