@@ -94,10 +94,18 @@ class Store:
             await c.execute("""INSERT INTO surveillance_jobs(id,kind,venue,payload) VALUES(%s,%s,%s,%s)
                                ON CONFLICT DO NOTHING""", (key, kind, venue, Jsonb(payload)))
 
-    async def claim(self):
+    async def claim(self, kinds=None, exclude_kinds=None):
         token = uuid.uuid4().hex
         async with self.connection() as c:
-            return await (await c.execute(CLAIM_SQL, (token,))).fetchone()
+            statement = CLAIM_SQL
+            params = [token]
+            if kinds is not None:
+                statement = statement.replace('WHERE enabled AND due_at', 'WHERE enabled AND kind=ANY(%s) AND due_at')
+                params.append(kinds)
+            if exclude_kinds:
+                statement = statement.replace('WHERE enabled AND ', 'WHERE enabled AND NOT(kind=ANY(%s)) AND ',1)
+                params.insert(1,exclude_kinds)
+            return await (await c.execute(statement, params)).fetchone()
 
     @staticmethod
     async def fence(c, job):

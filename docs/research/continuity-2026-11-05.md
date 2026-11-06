@@ -29,3 +29,11 @@
 The default rotating work queue now admits up to 32 markets, with storage headroom reducing that number when necessary. The single worker processes one bounded page or analysis step per job and requeues it after one second. Admission runs every five seconds. Requests still share the existing 0.6-second minimum interval and provider retry/backoff handling. Verification traversals retain the 60-second separation and full-interval comparison.
 
 This increases the number of markets making progress while other jobs wait. It does not introduce simultaneous analysis tasks or multiply the rate limit across workers. Actual throughput depends on page counts, network latency and source availability. Storage protections remain active throughout the larger queue.
+
+## Separate collection and analysis
+
+The collector now releases its slot immediately after successful interval verification and atomically enqueues a retrospective_analysis job. Reports expose analysis_pending until the analysis process begins producing slices. Existing collection jobs already at the analysis stage hand off their saved checkpoint on their next run.
+
+Docker Compose runs a dedicated analysis worker with one CPU and a 512 MiB memory limit. It claims only analysis jobs, seeds no crawling jobs and performs no HTTP collection. The collector excludes analysis jobs. Restart leases, evidence protection and completed-source checkpoints remain durable. Capacity eviction stays with the collector; the analysis worker only checks capacity headroom. Deployment stops both workers before recovering leases.
+
+Collection can continue across eligible settled markets within the chosen 30-day interval while analysis accumulates a separate backlog. API throughput, disk budgets and historical availability remain collection constraints. Trade-count limits pause oversized analysis without truncating collected input.

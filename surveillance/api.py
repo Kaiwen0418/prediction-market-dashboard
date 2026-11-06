@@ -106,7 +106,7 @@ def create_app(settings=None):
         states=await store.fetch('SELECT venue,status,count(*) AS n FROM surveillance_retrospectives GROUP BY venue,status')
         budgets=await store.fetch('SELECT * FROM surveillance_research_budget')
         jobs=await store.fetch("""SELECT id,kind,venue,enabled,failures,last_error,due_at,checkpoint FROM surveillance_jobs
-            WHERE kind IN ('settlement_discovery','retrospective_dispatch','research_bootstrap') OR (kind='retrospective' AND enabled)
+            WHERE kind IN ('settlement_discovery','retrospective_dispatch','research_bootstrap') OR (kind IN ('retrospective','retrospective_analysis') AND enabled)
             ORDER BY id LIMIT 100""")
         return dict(mode=settings.mode,states=states,budgets=budgets,jobs=jobs,
             tape_budget=settings.research_tape_max_bytes,summary_budget=settings.research_summary_max_bytes,

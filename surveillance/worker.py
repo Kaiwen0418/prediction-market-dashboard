@@ -23,10 +23,12 @@ class Worker:
     def __init__(self, settings, collector=None):
         self.settings = settings
         self.store = Store(settings.database_url)
-        self.capacity = CapacityGuard(self.store, settings)
+        self.capacity = CapacityGuard(self.store, settings,read_only=settings.worker_role=="analysis")
         self.collector = collector or Collector(self.store, RawArchive(settings.raw_dir), settings.request_interval)
 
     async def seed(self):
+        if self.settings.worker_role=="analysis":
+            return
         if self.settings.mode=='retrospective':
             # Preserve manual investigations; stop the automatic online workload.
             async with self.store.connection() as c:
@@ -283,7 +285,7 @@ class Worker:
     async def run_once(self):
         if not await self.capacity.check():
             return False
-        job = await self.store.claim()
+        job = await self.store.claim(kinds=['retrospective_analysis']) if self.settings.worker_role=='analysis' else await self.store.claim(exclude_kinds=['retrospective_analysis'])
         if not job:
             return False
         try:
@@ -299,7 +301,7 @@ class Worker:
             elif job['kind']=='research_bootstrap':
                 from .research_archive import bootstrap
                 delay=await bootstrap(self,job)
-            elif job['kind']=='retrospective':
+            elif job['kind'] in ('retrospective','retrospective_analysis'):
                 from .retrospective import run
                 delay=await run(self,job)
             elif job['kind'] == 'aggregates':
@@ -443,11 +445,11 @@ class Worker:
                     await self.store.fence(c,job)
                     await c.execute('UPDATE surveillance_jobs SET enabled=false WHERE id=%s',(job['id'],))
                 await self.store.coverage(job['venue'],'unmapped_market',{'reason':'metadata lookup failed three times; source remains unresolved'},job['id'])
-            if job['kind']=='retrospective' and job['failures']>=2:
+            if job['kind'] in ('retrospective','retrospective_analysis') and job['failures']>=2:
                 saved=await self.store.fetch('SELECT checkpoint FROM surveillance_jobs WHERE id=%s',(job['id'],))
                 cp=saved[0]['checkpoint']
                 from .retrospective import finish
-                await finish(self,job,dict(cp,source_error=type(exc).__name__),'continuity_unresolved')
+                await finish(self,job,dict(cp,source_error=type(exc).__name__),'analysis_unavailable' if job['kind']=='retrospective_analysis' else 'continuity_unresolved')
             await self.store.release(job, max(backoff, getattr(exc, "retry_after", 0)), reason)
         return True
 

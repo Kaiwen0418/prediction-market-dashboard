@@ -22,7 +22,7 @@ if not p.exists():
 PY
 docker compose --env-file deploy/.env -f deploy/local.compose.yml build backend
 docker compose --env-file deploy/.env -f deploy/local.compose.yml up -d --wait postgres
-docker compose --env-file deploy/.env -f deploy/local.compose.yml stop surveillance-worker
+docker compose --env-file deploy/.env -f deploy/local.compose.yml stop surveillance-worker surveillance-analysis
 docker compose --env-file deploy/.env -f deploy/local.compose.yml run --rm --no-deps surveillance-worker python -m surveillance.cli recover-worker
 docker compose --env-file deploy/.env -f deploy/local.compose.yml up -d --no-build
 docker compose --env-file deploy/.env -f deploy/local.compose.yml ps'

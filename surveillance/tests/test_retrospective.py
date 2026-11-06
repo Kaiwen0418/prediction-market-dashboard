@@ -142,6 +142,8 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
             cp=dict(continuity_version=1,stage='analyze',next_end=reviews[0]['document']['requested_end'],backfill_status='page_budget_exhausted')
             await self.store.checkpoint(job,cp);job['checkpoint']=cp
             await run(worker,job)
+            job=await self.store.claim(kinds=['retrospective_analysis'])
+            await run(worker,job)
             saved=(await self.store.fetch('SELECT checkpoint FROM surveillance_jobs WHERE id=%s',(job['id'],)))[0]['checkpoint']
             self.assertEqual(saved['slices'],1)
             self.assertEqual(saved['incomplete_slices'],0)

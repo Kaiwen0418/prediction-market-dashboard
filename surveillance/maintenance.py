@@ -34,7 +34,7 @@ async def prune(store, days=7, limit=50000):
         coverage = await c.execute("""DELETE FROM surveillance_coverage WHERE id IN (
             SELECT id FROM surveillance_coverage WHERE observed_at<%s LIMIT %s)""", (cutoff, limit))
         jobs = await c.execute("""DELETE FROM surveillance_jobs WHERE id IN (
-            SELECT id FROM surveillance_jobs WHERE NOT enabled AND kind IN ('details','trades','detect','backfill','event_review','wallet','scout_detect')
+            SELECT id FROM surveillance_jobs WHERE NOT enabled AND kind IN ('details','trades','detect','backfill','event_review','wallet','scout_detect','retrospective','retrospective_analysis')
             AND updated_at<%s AND (lease_until IS NULL OR lease_until<now()) LIMIT %s)""", (cutoff, limit))
         # A current rule snapshot and any case-pinned rule evidence survive expiry.
         rules = await c.execute("""DELETE FROM surveillance_rules r WHERE r.ctid IN (

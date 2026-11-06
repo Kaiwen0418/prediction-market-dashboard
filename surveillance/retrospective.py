@@ -144,6 +144,19 @@ async def finish(worker,job,cp,status):
     return 3600
 
 
+async def handoff(worker,job,cp):
+    """Release collection and create durable analysis work in one transaction."""
+    async with worker.store.connection() as c:
+        await worker.store.fence(c,job)
+        inserted=await (await c.execute("""INSERT INTO surveillance_jobs(id,kind,venue,payload,checkpoint)
+            VALUES(%s,'retrospective_analysis',%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id""",
+            ('analysis:'+job['payload']['review_id'],job['venue'],Jsonb(job['payload']),Jsonb(cp)))).fetchone()
+        if inserted:
+            await c.execute("UPDATE surveillance_retrospectives SET status='analysis_pending' WHERE id=%s AND status NOT IN ('excluded','superseded')",(job['payload']['review_id'],))
+        await c.execute('UPDATE surveillance_jobs SET enabled=false,checkpoint=%s,updated_at=now() WHERE id=%s',(Jsonb(cp),job['id']))
+    return 3600
+
+
 async def collect_page(worker,job,review,cp):
     venue=job['venue']; doc=review['document']; start=doc['requested_start']; end=doc['requested_end']
     phases=['current','historical'] if venue=='kalshi' else ['current']
@@ -177,7 +190,7 @@ async def collect_page(worker,job,review,cp):
             await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
         if cp.get('fills',0)==0:
             return await finish(worker,job,cp,'no_observed_trades')
-        return 1
+        return await handoff(worker,job,cp)
     params={'limit':1000}
     if venue=='polymarket':
         url='https://data-api.polymarket.com/v2/trades'
@@ -218,11 +231,14 @@ async def run(worker,job):
     cp=dict(job['checkpoint'])
     if not rows or rows[0]['status'] in ('superseded','excluded'):return await finish(worker,job,cp,'expired')
     review=rows[0]; doc=review['document']; start=doc['requested_start']; end=doc['requested_end']
+    if job['kind']=='retrospective_analysis' and (cp.get('continuity_version')!=1 or cp.get('stage')!='analyze'):
+        raise ValueError('Analysis requires verified collection checkpoint')
     if cp.get('continuity_version')!=1:
         cp=dict(continuity_version=1,stage='collect',phase=0,pages=0,fills=0,next_end=end)
         cp['pass']=1
         await worker.store.checkpoint(job,cp)
     if cp['stage']=='collect':return await collect_page(worker,job,review,cp)
+    if job['kind']=='retrospective':return await handoff(worker,job,cp)
     hi=datetime.fromisoformat(cp['next_end']); beginning=datetime.fromisoformat(start)
     if hi<=beginning:
         cp['completed_at']=now()
@@ -258,6 +274,6 @@ async def run(worker,job):
             VALUES(%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING''',(key,review['id'],lo,hi,Jsonb(report)))
         from .wallet_timing import persist
         await persist(c,key,trades,lo.isoformat(),hi.isoformat())
-        await c.execute("UPDATE surveillance_retrospectives SET status='analyzing' WHERE id=%s",(review['id'],))
+        await c.execute("UPDATE surveillance_retrospectives SET status='analyzing' WHERE id=%s AND status NOT IN ('excluded','superseded')",(review['id'],))
         await c.execute('UPDATE surveillance_jobs SET checkpoint=%s WHERE id=%s',(Jsonb(cp),job['id']))
     return 1
