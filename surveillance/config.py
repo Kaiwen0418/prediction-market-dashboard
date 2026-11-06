@@ -13,6 +13,7 @@ class Settings:
     research_tape_max_bytes: int = 10 * 1024**3
     research_summary_max_bytes: int = 512 * 1024**2
     review_lookback_days: int = 30
+    review_max_trades: int = 100000
     review_max_pages: int = 32
     review_concurrency: int = 32
     contracts_per_venue: int = 100
@@ -46,6 +47,7 @@ class Settings:
             research_tape_max_bytes=int(os.getenv("SURVEILLANCE_RESEARCH_TAPE_MAX_BYTES",str(10*1024**3))),
             research_summary_max_bytes=int(os.getenv("SURVEILLANCE_RESEARCH_SUMMARY_MAX_BYTES",str(512*1024**2))),
             review_lookback_days=int(os.getenv("SURVEILLANCE_REVIEW_LOOKBACK_DAYS","30")),
+            review_max_trades=int(os.getenv("SURVEILLANCE_REVIEW_MAX_TRADES","100000")),
             review_max_pages=int(os.getenv("SURVEILLANCE_REVIEW_MAX_PAGES","32")),
             review_concurrency=int(os.getenv("SURVEILLANCE_REVIEW_CONCURRENCY","32")),
             raw_dir=Path(os.getenv("SURVEILLANCE_RAW_DIR", "./surveillance-data")),
@@ -64,6 +66,8 @@ class Settings:
         )
 
     def __post_init__(self):
+        if self.review_max_trades<1:
+            raise ValueError("Positive market trade limit required")
         if self.worker_role not in ("collector","analysis"):
             raise ValueError("Invalid worker role")
         if self.mode not in ("retrospective","online") or not 1<=self.review_lookback_days<=90 or not 1<=self.review_max_pages<=64 or not 1<=self.review_concurrency<=128 or min(self.research_retention_days,self.research_tape_max_bytes,self.research_summary_max_bytes)<1:

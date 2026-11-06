@@ -215,6 +215,15 @@ async def collect_page(worker,job,review,cp):
         t['id']=t['identity']+(f":{counts[t['identity']]}" if venue=='polymarket' else '')
         if ts<end:
             t.update(raw_id=raw['id'],collection_scope='retrospective');accepted.append(t)
+    observed=cp.get('fills',0)+len(accepted)
+    if observed>worker.settings.review_max_trades:
+        cp.update(page_phase=phase,pages=cp.get('pages',0)+1,
+            trade_budget=dict(limit=worker.settings.review_max_trades,
+                stored_this_walk=cp.get('fills',0),observed_at_least=observed,
+                estimated_bytes_per_trade=4096,interval_complete=False))
+        # Keep the overflow response as evidence, without storing a truncated page.
+        await worker.store.commit_page(job,raw,cp,retrospective_settings=worker.settings)
+        return await finish(worker,job,cp,'trade_limit_exceeded')
     cp['page_phase']=phase
     cp['content_digest']=digest([cp.get('content_digest'),sorted((t['id'],t['price'],t['quantity'],t['direction'],t.get('wallet')) for t in accepted)])
     cp.update(cursor=cursor,counts=dict(counts),last_time=previous,pages=cp.get('pages',0)+1,
