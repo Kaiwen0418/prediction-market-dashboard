@@ -71,18 +71,17 @@ class Store:
         self.dsn = dsn
 
     @asynccontextmanager
-    async def connection(self, exclusive=False):
+    async def connection(self, exclusive=False, initializing=False):
         async with await psycopg.AsyncConnection.connect(self.dsn, row_factory=dict_row) as connection:
             await connection.execute("SET LOCAL statement_timeout='30s'")
-            await connection.execute("SET LOCAL lock_timeout='2s'")
+            await connection.execute("SET LOCAL lock_timeout='25s'" if initializing else "SET LOCAL lock_timeout='2s'")
             await connection.execute("SELECT pg_advisory_lock(81724003)" if exclusive else
                                      "SELECT pg_advisory_xact_lock_shared(81724003)")
             yield connection
 
     async def initialize(self):
-        async with self.connection() as c:
-            # Serialize concurrent first-start migrations.
-            await c.execute("SELECT pg_advisory_xact_lock(81724001)")
+        async with self.connection(exclusive=True, initializing=True) as c:
+            # Schema DDL must also exclude normal transactions on other workers.
             await c.execute(Path(__file__).with_name("schema.sql").read_text())
 
     async def fetch(self, sql, params=()):
