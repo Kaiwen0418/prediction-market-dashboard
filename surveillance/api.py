@@ -112,6 +112,7 @@ def create_app(settings=None):
             tape_budget=settings.research_tape_max_bytes,summary_budget=settings.research_summary_max_bytes,
             budget_basis='Recorded tuple bytes plus per-row allowance; global physical DB ceiling also applies',
             retention_days=settings.research_retention_days,lookback_days=settings.review_lookback_days,
+            market_trade_limit=settings.review_max_trades,estimated_bytes_per_trade=4096,
             limits='Bounded archive and lookback, not guaranteed full market lifetime or full venue coverage')
 
     @app.get('/retrospectives/{review_id}')

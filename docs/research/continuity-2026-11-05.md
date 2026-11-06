@@ -37,3 +37,13 @@ The collector now releases its slot immediately after successful interval verifi
 Docker Compose runs a dedicated analysis worker with one CPU and a 512 MiB memory limit. It claims only analysis jobs, seeds no crawling jobs and performs no HTTP collection. The collector excludes analysis jobs. Restart leases, evidence protection and completed-source checkpoints remain durable. Capacity eviction stays with the collector; the analysis worker only checks capacity headroom. Deployment stops both workers before recovering leases.
 
 Collection can continue across eligible settled markets within the chosen 30-day interval while analysis accumulates a separate backlog. API throughput, disk budgets and historical availability remain collection constraints. Trade-count limits pause oversized analysis without truncating collected input.
+
+## Per-market trade budget
+
+Default SURVEILLANCE_REVIEW_MAX_TRADES is 100000 returned trade records per interval traversal, across both Kalshi sources. The verification pass has its own counter, so repeating a traversal does not double-charge that limit. Overlap between upstream sources may conservatively count the same execution more than once. Completed historical dossiers are retained.
+
+Measured on 2026-11-06: the compact tape occupies 2,005,868,544 physical bytes for 7,957,503 archived rows, about 252 bytes per copy. The normalized trade table and indexes occupy 14,134,558,720 bytes for approximately 8,442,891 rows, about 1,674 bytes per row. Protected raw files total 116,804,300 bytes, shared across traversals. These are aggregate measurements with legacy data, compression and reusable pages, not a precise marginal cost.
+
+Use 4 KiB per trade as a conservative planning estimate for two traversals and indexing overhead. 100000 records estimate 390.6 MiB, below the default 512 MiB database reserve. Larger configured trade limits automatically increase admission reserves, with separate raw and archive estimates. Global space guards remain authoritative.
+
+When a page would cross the limit, preserve its complete raw response and stop with trade_limit_exceeded. Do not insert a partial normalized page or queue analysis. Earlier pages remain retained. The API exposes the configured limit and the dossier records stored_this_walk, observed_at_least and interval_complete=false. This chooses a smaller eligible dataset instead of treating truncated intervals as complete.

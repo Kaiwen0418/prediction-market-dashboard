@@ -276,3 +276,24 @@ class RetrospectiveTests(unittest.IsolatedAsyncioTestCase):
         finally:await worker.collector.close()
         self.assertEqual((await self.store.fetch("SELECT count(*) AS n FROM surveillance_retrospectives WHERE status='no_observed_trades'"))[0]['n'],20)
         self.assertEqual((await self.store.fetch("SELECT status FROM surveillance_retrospectives WHERE id='positive'"))[0]['status'],'collecting')
+
+    async def test_trade_limit_preserves_overflow_evidence_without_partial_page(self):
+        from surveillance.retrospective import collect_page
+        m,raw,row=await self.final_market()
+        async with self.store.connection() as c:key=await register(c,m,raw,self.settings)
+        review=(await self.store.fetch('SELECT * FROM surveillance_retrospectives WHERE id=%s',(key,)))[0]
+        source=dict(poly(),timestamp=int((datetime.fromisoformat(review['document']['requested_end'])-timedelta(minutes=10)).timestamp()))
+        def handler(request):
+            return httpx.Response(200,json={'data':[source,source],'pagination':{'has_more':False,'next_cursor':None}})
+        worker=Worker(replace(self.settings,review_max_trades=1),Collector(self.store,self.archive,0,httpx.AsyncClient(transport=httpx.MockTransport(handler))))
+        try:
+            await self.store.enqueue('limited','retrospective','polymarket',{'review_id':key,'market_id':'c1'})
+            job=await self.store.claim()
+            await collect_page(worker,job,review,{'stage':'collect'})
+            state=(await self.store.fetch('SELECT status,document FROM surveillance_retrospectives WHERE id=%s',(key,)))[0]
+            self.assertEqual(state['status'],'trade_limit_exceeded')
+            self.assertFalse(state['document']['completion']['trade_budget']['interval_complete'])
+            self.assertEqual(await self.store.fetch('SELECT id FROM surveillance_trades'),[])
+            self.assertEqual(len(await self.store.fetch('SELECT * FROM surveillance_review_pages')),1)
+            self.assertEqual(await self.store.fetch("SELECT id FROM surveillance_jobs WHERE kind='retrospective_analysis'"),[])
+        finally:await worker.collector.close()
